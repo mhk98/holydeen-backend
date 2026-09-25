@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const http = require("http");
+const path = require("path");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const swaggerJsdoc = require("swagger-jsdoc");
@@ -14,10 +15,24 @@ const routes = require("./app/routes");
 const ApiError = require("./error/ApiError");
 const userLogHistory = require("./app/middlewares/userLogHistory");
 const { initializeChatSocket } = require("./app/realtime/socket");
+const {
+  isCloudinaryEnabled,
+  cloudinaryUrlForLegacyFile,
+} = require("./helpers/cloudinary");
 
 const app = express();
 const server = http.createServer(app);
 initializeChatSocket(server);
+
+let compression;
+try {
+  compression = require("compression");
+} catch (error) {
+  if (error.code !== "MODULE_NOT_FOUND") {
+    throw error;
+  }
+  console.warn("Optional dependency 'compression' is not installed; continuing without response compression.");
+}
 
 const requiredEnvVars = ["TOKEN_SECRET", "REFRESH_SECRET"];
 const missingEnvVars = requiredEnvVars.filter(
@@ -41,6 +56,14 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" }, // allow /images to be served cross-origin
   }),
 );
+
+/* ========================
+   COMPRESSION (gzip JSON & static responses)
+======================== */
+
+if (compression) {
+  app.use(compression());
+}
 
 /* ========================
    CORS
@@ -142,6 +165,18 @@ app.use(userLogHistory);
 ======================== */
 
 app.use("/images", express.static(process.env.UPLOAD_DIR || "images"));
+
+// Older records store only "<uuid>.<ext>". Once those files are migrated to
+// Cloudinary (tools/migrateUploadsToCloudinary.js) they no longer exist on
+// disk, so redirect to the Cloudinary copy that keeps the same name.
+if (isCloudinaryEnabled) {
+  app.get("/images/:name", (req, res, next) => {
+    const name = path.basename(req.params.name);
+    const ext = path.extname(name).toLowerCase();
+    if (!ext) return next();
+    res.redirect(301, cloudinaryUrlForLegacyFile(name, ext));
+  });
+}
 
 /* ========================
    SWAGGER DOCS
