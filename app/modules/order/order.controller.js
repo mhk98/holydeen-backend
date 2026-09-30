@@ -63,6 +63,16 @@ const createOrder = catchAsync(async (req, res) => {
   });
 });
 
+const createStaffOrder = catchAsync(async (req, res) => {
+  const result = await OrderService.createStaffOrderInDB(req.body);
+  sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: "Order created successfully",
+    data: result,
+  });
+});
+
 const saveIncompleteOrder = catchAsync(async (req, res) => {
   const result = await OrderService.saveIncompleteOrderInDB({
     ...req.body,
@@ -321,6 +331,7 @@ const deleteOrder = catchAsync(async (req, res) => {
 
 const OrderController = {
   createOrder,
+  createStaffOrder,
   saveIncompleteOrder,
   getOrders,
   getOrderStatusCounts,

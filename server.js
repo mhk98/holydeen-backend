@@ -20,7 +20,9 @@ const {
   cloudinaryUrlForLegacyFile,
 } = require("./helpers/cloudinary");
 
-const { createCourierSyncWorker } = require("./app/modules/order/courierSync.worker");
+const {
+  createCourierSyncWorker,
+} = require("./app/modules/order/courierSync.worker");
 const courierSyncWorker = createCourierSyncWorker({
   Order: db.order,
   service: require("./app/modules/order/order.service"),
@@ -37,7 +39,9 @@ try {
   if (error.code !== "MODULE_NOT_FOUND") {
     throw error;
   }
-  console.warn("Optional dependency 'compression' is not installed; continuing without response compression.");
+  console.warn(
+    "Optional dependency 'compression' is not installed; continuing without response compression.",
+  );
 }
 
 const requiredEnvVars = ["TOKEN_SECRET", "REFRESH_SECRET"];

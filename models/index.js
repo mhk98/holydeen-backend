@@ -453,6 +453,7 @@ const ensureVariationStorefrontColumns = async () => {
     allowNull: true,
   });
   await maybeAdd("attribute", { type: DataTypes.STRING(500), allowNull: true });
+  await maybeAdd("options", { type: DataTypes.JSON, allowNull: true });
   await maybeAdd("purchasePrice", {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: true,
@@ -928,6 +929,10 @@ const ensureOrderAssignmentColumns = async () => {
   });
   await maybeAdd("assignedAt", {
     type: DataTypes.DATE,
+    allowNull: true,
+  });
+  await maybeAdd("stockLedger", {
+    type: DataTypes.JSON,
     allowNull: true,
   });
 };

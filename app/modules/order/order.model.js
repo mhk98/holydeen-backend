@@ -118,6 +118,11 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // Variant stock currently held by this order: [{ variationId, qty }]
+      stockLedger: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
       deletedAt: {
         type: DataTypes.DATE,
         allowNull: true,

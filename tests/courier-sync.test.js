@@ -57,6 +57,8 @@ function setup(provider, { fail = false, changed = false, status = 'in_courier' 
         steadfast: { apiKey: 'test', secretKey: 'test' },
         pathao: { clientId: 'test', clientSecret: 'test', username: 'test', password: 'test', storeId: 1 },
       } }) };
+      if (name === './orderPricing') return { priceOrderItems: async (payload) => payload };
+      if (name === './orderStock') return { registerOrderStockHooks() {} };
       if (name === 'crypto' || name === 'sequelize') return require(name);
       return {};
     },

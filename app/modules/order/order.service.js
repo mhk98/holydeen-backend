@@ -9,8 +9,11 @@ const OrderStatusService = require("../orderStatus/orderStatus.service");
 const CouponCodeService = require("../couponCode/couponCode.service");
 const NotificationService = require("../notification/notification.service");
 const SmsMarketingService = require("../smsMarketing/smsMarketing.service");
+const { priceOrderItems, resolveStaffItems, calculateStaffTotals } = require("./orderPricing");
+const { registerOrderStockHooks } = require("./orderStock");
 
 const Order = db.order;
+registerOrderStockHooks(Order);
 const IpBlock = db.ipBlock;
 const User = db.user;
 const FAILED_DELIVERY_STATUSES = ["cancelled", "returned", "on_hold"];
@@ -944,7 +947,13 @@ const applyOrderCoupon = async (payload = {}) => {
   };
 };
 
-const normalizeCreatePayload = (payload) => {
+const buildItemsProductName = (items = []) =>
+  items
+    .map((item) => `${item.name}${item.variant ? ` (${item.variant})` : ""} x${item.qty || 1}`)
+    .join(", ")
+    .slice(0, 255);
+
+const normalizeCreatePayload = ({ stockLedger, ...payload }) => {
   const orderSource = payload.orderSource || payload.source || "Website";
   if (!Array.isArray(payload.items)) {
     return {
@@ -957,7 +966,7 @@ const normalizeCreatePayload = (payload) => {
   const items = payload.items;
   const quantity = items.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 1;
   const firstItem = items[0] || {};
-  const productName = items.map((item) => `${item.name} x${item.qty || 1}`).join(", ");
+  const productName = buildItemsProductName(items);
   const meta = {
     __frontendOrder: true,
     customerAddress: payload.customerAddress || "",
@@ -1021,7 +1030,8 @@ const createOrderInDB = async (payload, options = {}) => {
       throw new ApiError(403, "Orders from this IP address are blocked");
     }
   }
-  const checkedPayload = await applyOrderCoupon({ ...payload, ipAddress, deviceId });
+  const pricedPayload = await priceOrderItems(payload, { strict: true });
+  const checkedPayload = await applyOrderCoupon({ ...pricedPayload, ipAddress, deviceId });
   const normalizedPayload = normalizeCreatePayload(checkedPayload);
   // Run settings checks before taking the write lock: they use their own DB connection.
   // Replays are resolved first below, so an already saved checkout can still be retrieved.
@@ -1059,6 +1069,52 @@ const createOrderInDB = async (payload, options = {}) => {
   return toPublicOrder(order);
 };
 
+// Orders placed by staff from the admin panel (POS). Staff prices are trusted, but every
+// product line is resolved to a variant so stock is tracked.
+const createStaffOrderInDB = async (payload = {}) => {
+  const items = await resolveStaffItems(payload.items);
+  const totals = calculateStaffTotals(items, payload);
+  const orderSource = payload.orderSource || payload.source || "Manual";
+  const normalizedPayload = {
+    ...normalizeCreatePayload({
+      ...payload,
+      ...totals,
+      items,
+      advance: Math.max(0, Number(payload.advance) || 0),
+      customerAddress: payload.customerAddress || payload.customerArea || "",
+      paymentMethod: "cod",
+      orderSource,
+    }),
+    orderDate: payload.orderDate || new Date().toISOString().slice(0, 10),
+  };
+
+  const { order, created } = await withOrderWriteLock(async (transaction) => {
+    const checkoutKey = checkoutKeyFromPayload(payload);
+    if (checkoutKey) {
+      const existing = await Order.findOne({ where: { checkoutKey }, transaction });
+      if (existing) return { order: existing, created: false };
+    }
+    const orderId = await generateOrderId(transaction);
+    const order = await Order.create({ ...normalizedPayload, orderId, checkoutKey }, { transaction });
+    return { order, created: true };
+  });
+
+  if (created) {
+    await NotificationService.createForRoles(
+      ["superAdmin", "admin", "cs"],
+      {
+        title: "New order received",
+        message: `${order.orderId} — ${order.customerName || "Customer"} — ৳${Number(order.totalBill || 0).toFixed(2)}`,
+        type: "order_created",
+        priority: "high",
+        url: "/#page=orders&orderStatus=pending",
+        data: { orderId: order.Id, invoiceId: order.orderId },
+      },
+    ).catch((error) => console.error("Order notification failed:", error.message));
+  }
+  return toPublicOrder(order);
+};
+
 const saveIncompleteOrderInDB = async (payload = {}) => {
   const phone = String(payload.customerPhone || "").trim();
   if (!phone) throw new ApiError(400, "Customer phone is required");
@@ -1069,7 +1125,8 @@ const saveIncompleteOrderInDB = async (payload = {}) => {
   }
   const ipAddress = normalizeIpAddress(payload.ipAddress);
   const deviceId = normalizeDeviceId(payload.deviceId);
-  const checkedPayload = await applyOrderCoupon({ ...payload, ipAddress, deviceId });
+  const pricedPayload = await priceOrderItems(payload, { strict: false });
+  const checkedPayload = await applyOrderCoupon({ ...pricedPayload, ipAddress, deviceId });
   const normalizedPayload = {
     ...normalizeCreatePayload({
       ...checkedPayload,
@@ -1431,7 +1488,7 @@ const verifyOrderReconfirmOtpInDB = async (id, payload = {}) => {
 const updateOrderInDB = async (id, payload) => {
   const order = await Order.findByPk(id);
   if (!order) throw new ApiError(404, "Order not found");
-  const next = { ...payload };
+  const { stockLedger, ...next } = payload;
   if (next.source && !next.orderSource) {
     next.orderSource = next.source;
   }
@@ -1473,6 +1530,30 @@ const updateOrderInDB = async (id, payload) => {
       }
     }
   }
+  if (Array.isArray(next.items)) {
+    // Staff edited the order lines: store them in the order meta (which also drives
+    // variant stock via the order hooks) and recompute the totals.
+    const items = await resolveStaffItems(next.items);
+    const totals = calculateStaffTotals(items, next);
+    const meta = parseAnyOrderMeta(next.note ?? order.note);
+    const advance = next.advance !== undefined ? Math.max(0, Number(next.advance) || 0) : Number(order.advance || 0);
+    next.note = JSON.stringify({
+      ...meta,
+      __frontendOrder: meta.__frontendOrder ?? true,
+      items,
+      ...totals,
+      advance,
+    });
+    next.productName = buildItemsProductName(items) || order.productName;
+    next.productImage = items[0]?.image || order.productImage;
+    next.quantity = items.reduce((sum, item) => sum + item.qty, 0);
+    next.totalBill = totals.total;
+    next.advance = advance;
+  }
+  delete next.items;
+  delete next.subtotal;
+  delete next.deliveryCharge;
+  delete next.discount;
   if (Object.prototype.hasOwnProperty.call(next, "fraudStatus")) {
     const { fraudStatus, fraudReason, ...otherUpdates } = next;
     if (Object.keys(otherUpdates).length) {
@@ -2017,6 +2098,7 @@ const updateOrderStatusInDB = async (id, status, actorUserId) => {
 
 const OrderService = {
   createOrderInDB,
+  createStaffOrderInDB,
   saveIncompleteOrderInDB,
   getOrdersFromDB,
   getOrderStatusCountsFromDB,
