@@ -1,17 +1,15 @@
 const multer = require("multer");
-const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
 const {
   isCloudinaryEnabled,
   uploadToCloudinary,
 } = require("../../helpers/cloudinary");
+const ApiError = require("../../error/ApiError");
 
-// Local fallback (used only when Cloudinary credentials are not set).
-// In production, point UPLOAD_DIR to an absolute path OUTSIDE the git-deployed
-// directory (e.g. /home/<user>/persistent-uploads) so files survive redeploys.
-const UPLOAD_DIR = process.env.UPLOAD_DIR || "images";
-if (!isCloudinaryEnabled) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Every upload goes to Cloudinary; there is no local disk fallback, so a
+// missing configuration fails the request instead of silently writing files
+// that disappear on the next deploy.
 
 // Allowed MIME types — zip removed (security risk)
 const ALLOWED_MIME_TYPES = new Set([
@@ -36,16 +34,7 @@ const ALLOWED_EXTENSIONS = new Set([
 const generateFileName = (file) =>
   `${randomUUID()}${path.extname(file.originalname).toLowerCase()}`;
 
-const storage = isCloudinaryEnabled
-  ? multer.memoryStorage()
-  : multer.diskStorage({
-      destination: (req, file, cb) => {
-        cb(null, UPLOAD_DIR);
-      },
-      filename: (req, file, cb) => {
-        cb(null, generateFileName(file));
-      },
-    });
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
@@ -81,14 +70,15 @@ const pushToCloudinary = async (req) => {
   );
 };
 
-const withStorage = (multerMiddleware) => {
-  if (!isCloudinaryEnabled) return multerMiddleware;
-  return (req, res, next) => {
-    multerMiddleware(req, res, (err) => {
-      if (err) return next(err);
-      pushToCloudinary(req).then(() => next(), next);
-    });
-  };
+const withStorage = (multerMiddleware) => (req, res, next) => {
+  multerMiddleware(req, res, (err) => {
+    if (err) return next(err);
+    if (!collectFiles(req).length) return next();
+    if (!isCloudinaryEnabled) {
+      return next(new ApiError(500, "File storage is not configured (Cloudinary credentials missing)"));
+    }
+    pushToCloudinary(req).then(() => next(), next);
+  });
 };
 
 const createUpload = () =>
