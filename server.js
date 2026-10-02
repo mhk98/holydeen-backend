@@ -83,8 +83,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5173",
-  "https://apireact.digitalever.com.bd",
-  "https://adminreact.digitalever.com.bd",
+  "https://api.holydeen.com",
+  "https://admin.holydeen.com",
 ];
 
 const ALLOWED_ORIGINS = new Set(
