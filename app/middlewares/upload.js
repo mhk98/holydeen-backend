@@ -48,6 +48,16 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// Profile photos: images only (no PDF), checked before anything reaches Cloudinary.
+const imageOnlyFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (file.mimetype.startsWith("image/") && ALLOWED_MIME_TYPES.has(file.mimetype) && ext !== ".pdf" && ALLOWED_EXTENSIONS.has(ext)) {
+    cb(null, true);
+  } else {
+    cb(new ApiError(400, "Invalid image format. Allowed: jpeg, jpg, png, gif, webp"));
+  }
+};
+
 const collectFiles = (req) => {
   if (req.file) return [req.file];
   if (Array.isArray(req.files)) return req.files;
@@ -72,7 +82,9 @@ const pushToCloudinary = async (req) => {
 
 const withStorage = (multerMiddleware) => (req, res, next) => {
   multerMiddleware(req, res, (err) => {
-    if (err) return next(err);
+    if (err) {
+      return next(err.code === "LIMIT_FILE_SIZE" ? new ApiError(400, "File is too large") : err);
+    }
     if (!collectFiles(req).length) return next();
     if (!isCloudinaryEnabled) {
       return next(new ApiError(500, "File storage is not configured (Cloudinary credentials missing)"));
@@ -106,10 +118,15 @@ const uploadUserDocuments = withStorage(
 
 const uploadMultiple = withStorage(createUpload().array("gallery_images", 10));
 
+const uploadAvatar = withStorage(
+  multer({ storage, limits: { fileSize: 2 * 1024 * 1024 }, fileFilter: imageOnlyFilter }).single("image"),
+);
+
 module.exports = {
   uploadFile,
   uploadPdf,
   uploadSingle,
   uploadUserDocuments,
   uploadMultiple,
+  uploadAvatar,
 };

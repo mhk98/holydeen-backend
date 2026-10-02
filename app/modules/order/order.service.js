@@ -1372,6 +1372,29 @@ const trackOrdersByPhoneFromDB = async (phone, invoiceId, options = {}) => {
   return orders.map(toPublicOrder);
 };
 
+const getCustomerOrderHistoryFromDB = async (phone, { page = 1, limit = 5 } = {}) => {
+  const normalized = normalizePhone(phone);
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 50);
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  if (!normalized) return { orders: [], meta: { page: safePage, limit: safeLimit, total: 0 } };
+
+  const { rows, count } = await Order.findAndCountAll({
+    where: {
+      customerPhone: { [Op.like]: `%${normalized}%` },
+      status: { [Op.ne]: "incomplete" },
+    },
+    limit: safeLimit,
+    offset: (safePage - 1) * safeLimit,
+    order: [["Id", "DESC"]],
+    paranoid: true,
+  });
+
+  return {
+    orders: rows.map(toPublicOrder),
+    meta: { page: safePage, limit: safeLimit, total: count },
+  };
+};
+
 const getReconfirmOrder = async (id, phone) => {
   const rawId = String(id || "").trim();
   const normalizedPhone = normalizePhone(phone);
@@ -2104,6 +2127,7 @@ const OrderService = {
   getOrderStatusCountsFromDB,
   getOrderByIdFromDB,
   trackOrdersByPhoneFromDB,
+  getCustomerOrderHistoryFromDB,
   sendOrderReconfirmOtpInDB,
   verifyOrderReconfirmOtpInDB,
   updateOrderInDB,
