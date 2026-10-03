@@ -128,6 +128,10 @@ const updateProfile = async (user, { name, email, address, city } = {}) => {
     updates.City = String(city).trim().slice(0, 255) || null;
   }
 
+  if (Object.keys(updates).length === 0) {
+    throw new ApiError(400, "No profile fields were sent");
+  }
+
   await row.update(updates);
   return toProfile(row);
 };
