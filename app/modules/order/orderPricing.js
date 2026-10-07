@@ -9,7 +9,8 @@ const {
 } = require("../../../shared/productVariants");
 
 const MAX_ITEM_QTY = 1000;
-const DEFAULT_DHAKA_CHARGE = 70;
+// Also the minimum: a lower charge in settings or on a landing page is raised to these.
+const DEFAULT_DHAKA_CHARGE = 80;
 const DEFAULT_OUTSIDE_DHAKA_CHARGE = 130;
 
 const toQty = (value) => Math.min(Math.max(1, Math.floor(Number(value) || 1)), MAX_ITEM_QTY);
@@ -71,6 +72,7 @@ const chargeAmount = (charge) => {
 
 const getWebsiteDeliveryCharge = async (district) => {
   const isDhaka = String(district || "").trim().toLowerCase() === "dhaka";
+  const minimum = isDhaka ? DEFAULT_DHAKA_CHARGE : DEFAULT_OUTSIDE_DHAKA_CHARGE;
   const charges = db.deliveryCharge
     ? await db.deliveryCharge.findAll({
         order: [["date", "DESC"], ["createdAt", "DESC"]],
@@ -80,10 +82,10 @@ const getWebsiteDeliveryCharge = async (district) => {
     : [];
   const matcher = isDhaka ? hasInsideDhakaText : hasOutsideDhakaText;
   const matched = chargeAmount(charges.find((charge) => matcher(String(charge.note || ""))));
-  if (matched !== null) return matched;
+  if (matched !== null) return Math.max(matched, minimum);
   const fallback = chargeAmount(charges[isDhaka ? 0 : 1]);
-  if (fallback !== null) return fallback;
-  return isDhaka ? DEFAULT_DHAKA_CHARGE : DEFAULT_OUTSIDE_DHAKA_CHARGE;
+  if (fallback !== null) return Math.max(fallback, minimum);
+  return minimum;
 };
 
 const loadProducts = async (ids) => {
@@ -157,8 +159,8 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
   let deliveryCharge = 0;
   if (!allFreeShipping) {
     deliveryCharge = outside
-      ? toPositiveNumber(regularData.deliveryOutside, DEFAULT_OUTSIDE_DHAKA_CHARGE)
-      : toPositiveNumber(regularData.deliveryInside, DEFAULT_DHAKA_CHARGE);
+      ? Math.max(toPositiveNumber(regularData.deliveryOutside, 0), DEFAULT_OUTSIDE_DHAKA_CHARGE)
+      : Math.max(toPositiveNumber(regularData.deliveryInside, 0), DEFAULT_DHAKA_CHARGE);
   }
 
   return { ...payload, items, deliveryCharge };
