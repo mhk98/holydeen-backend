@@ -117,7 +117,21 @@ const generateOrderId = async (transaction) => {
     transaction,
   });
   const nextNum = last ? last.Id + 1 : 1;
-  return `TJ-${String(nextNum).padStart(4, "0")}`;
+  return `${ORDER_ID_PREFIX}-${String(nextNum).padStart(4, "0")}`;
+};
+
+// Older orders were stored as TJ-/WZ-; the number part is the same sequence, so an
+// invoice typed with any of these prefixes matches the stored order.
+const ORDER_ID_PREFIX = "HD";
+const LEGACY_ORDER_ID_PREFIXES = ["TJ", "WZ"];
+
+const orderIdVariants = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^([A-Za-z]{2})-?(\d+)$/);
+  const prefixes = [ORDER_ID_PREFIX, ...LEGACY_ORDER_ID_PREFIXES];
+  if (!match || !prefixes.includes(match[1].toUpperCase())) return [raw];
+  const num = match[2].padStart(4, "0");
+  return prefixes.map((prefix) => `${prefix}-${num}`);
 };
 
 const parseOrderMeta = (note) => {
@@ -168,7 +182,7 @@ const toPublicOrder = (order) => {
 
   return {
     ...withAssignmentUsers(plain),
-    invoiceId: plain.orderId,
+    invoiceId: orderIdVariants(plain.orderId)[0] || plain.orderId,
     customerAddress: meta.customerAddress || [plain.customerArea, plain.customerDistrict].filter(Boolean).join(", "),
     paymentMethod: meta.paymentMethod || "cod",
     paymentStatus: meta.paymentStatus || "pending",
@@ -1252,9 +1266,13 @@ const getOrdersFromDB = async (filters, paginationOptions, currentUser = {}) => 
   }
 
   if (search) {
-    where[Op.or] = ORDER_SEARCHABLE_FIELDS.map((field) => ({
-      [field]: { [Op.like]: `%${search}%` },
-    }));
+    const invoiceVariants = orderIdVariants(search);
+    where[Op.or] = [
+      ...ORDER_SEARCHABLE_FIELDS.map((field) => ({
+        [field]: { [Op.like]: `%${search}%` },
+      })),
+      ...(invoiceVariants.length > 1 ? [{ orderId: { [Op.in]: invoiceVariants } }] : []),
+    ];
   }
 
   if (fromDate && toDate) {
@@ -1348,7 +1366,7 @@ const trackOrdersByPhoneFromDB = async (phone, invoiceId, options = {}) => {
 
   const activeTrackingStatuses = ["pending", "confirmed", "packaging", "in_courier", "on_hold"];
   const baseWhere = normalizedInvoice
-    ? { orderId: normalizedInvoice }
+    ? { orderId: { [Op.in]: orderIdVariants(normalizedInvoice) } }
     : { customerPhone: { [Op.like]: `%${normalized}%` } };
   const where = normalizedInvoice || options.includeHistory
     ? baseWhere
@@ -1407,7 +1425,7 @@ const getReconfirmOrder = async (id, phone) => {
     where: {
       [Op.or]: [
         ...(Number(rawId) ? [{ Id: Number(rawId) }] : []),
-        { orderId: rawId },
+        { orderId: { [Op.in]: orderIdVariants(rawId) } },
       ],
       customerPhone: { [Op.like]: `%${normalizedPhone}%` },
     },
