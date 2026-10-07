@@ -145,6 +145,18 @@ test('delivery charge and advance are decided by the server', async () => {
   assert.equal(landing.deliveryCharge, 150);
 });
 
+test('landing orders ship free when every linked product is free shipping', async () => {
+  const db = pricingDb();
+  db.landingPage.findOne = async () => ({ Id: 8, regularData: JSON.stringify({
+    deliveryInside: 90,
+    productOptions: [{ productId: 3, name: 'Free Offer', price: 350 }, { productId: 2, name: 'Oud Offer', price: 850 }],
+  }) });
+  const { priceOrderItems } = load('../app/modules/order/orderPricing', db);
+  const order = (items) => priceOrderItems({ orderSource: 'Landing Page', tracking: { landingPageId: 8 }, customerDistrict: 'inside', items });
+  assert.equal((await order([{ id: 3, name: 'Free Offer', qty: 1 }])).deliveryCharge, 0);
+  assert.equal((await order([{ id: 3, name: 'Free Offer', qty: 1 }, { id: 2, name: 'Oud Offer', qty: 1 }])).deliveryCharge, 90);
+});
+
 test('public orders must contain items', async () => {
   const { priceOrderItems } = load('../app/modules/order/orderPricing', pricingDb());
   await assert.rejects(priceOrderItems({ totalBill: 1, productName: 'x' }), /No items/);
