@@ -4,6 +4,7 @@ const pick = require("../../../shared/pick");
 const OrderService = require("./order.service");
 const OrderFraudCheckService = require("./orderFraudCheck.service");
 const TrackingService = require("../tracking/tracking.service");
+const { getClientIp } = require("../../utils/clientIp");
 
 // Retain the same ID on retries and in the browser for platform deduplication.
 async function deliverPurchase(payload, context) {
@@ -19,20 +20,10 @@ async function deliverPurchase(payload, context) {
   console.warn("Purchase tracking delivery failed", payload.eventId);
 }
 
-const resolveIpAddress = (req) => {
-  const forwardedFor = req.headers["x-forwarded-for"];
-  const rawIp = Array.isArray(forwardedFor)
-    ? forwardedFor[0]
-    : String(forwardedFor || "").split(",")[0];
-  return (rawIp || req.ip || req.socket?.remoteAddress || "")
-    .replace(/^::ffff:/, "")
-    .trim() || null;
-};
-
 const createOrder = catchAsync(async (req, res) => {
   const result = await OrderService.createOrderInDB({
     ...req.body,
-    ipAddress: req.body.ipAddress || resolveIpAddress(req),
+    ipAddress: getClientIp(req),
   });
   if (req.body.landingTracking?.enabled === true) {
     const eventId = `Purchase.order.${result.Id || result.orderId}`;
@@ -53,7 +44,7 @@ const createOrder = catchAsync(async (req, res) => {
         currency: "BDT",
         order_id: result.orderId || result.Id,
       },
-    }, { headers: req.headers, ip: resolveIpAddress(req) });
+    }, { headers: req.headers, ip: getClientIp(req) });
   }
   sendResponse(res, {
     statusCode: 201,
@@ -76,7 +67,7 @@ const createStaffOrder = catchAsync(async (req, res) => {
 const saveIncompleteOrder = catchAsync(async (req, res) => {
   const result = await OrderService.saveIncompleteOrderInDB({
     ...req.body,
-    ipAddress: req.body.ipAddress || resolveIpAddress(req),
+    ipAddress: getClientIp(req),
   });
   sendResponse(res, {
     statusCode: 200,

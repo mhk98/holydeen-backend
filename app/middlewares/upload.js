@@ -44,24 +44,37 @@ const fileFilter = (req, file, cb) => {
   if (mimeOk && extOk) {
     cb(null, true);
   } else {
-    cb(new Error("Invalid file format. Allowed: jpeg, jpg, png, gif, webp, pdf"));
+    cb(
+      new Error("Invalid file format. Allowed: jpeg, jpg, png, gif, webp, pdf"),
+    );
   }
 };
 
 // Profile photos: images only (no PDF), checked before anything reaches Cloudinary.
 const imageOnlyFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
-  if (file.mimetype.startsWith("image/") && ALLOWED_MIME_TYPES.has(file.mimetype) && ext !== ".pdf" && ALLOWED_EXTENSIONS.has(ext)) {
+  if (
+    file.mimetype.startsWith("image/") &&
+    ALLOWED_MIME_TYPES.has(file.mimetype) &&
+    ext !== ".pdf" &&
+    ALLOWED_EXTENSIONS.has(ext)
+  ) {
     cb(null, true);
   } else {
-    cb(new ApiError(400, "Invalid image format. Allowed: jpeg, jpg, png, gif, webp"));
+    cb(
+      new ApiError(
+        400,
+        "Invalid image format. Allowed: jpeg, jpg, png, gif, webp",
+      ),
+    );
   }
 };
 
 const collectFiles = (req) => {
   if (req.file) return [req.file];
   if (Array.isArray(req.files)) return req.files;
-  if (req.files && typeof req.files === "object") return Object.values(req.files).flat();
+  if (req.files && typeof req.files === "object")
+    return Object.values(req.files).flat();
   return [];
 };
 
@@ -71,7 +84,10 @@ const pushToCloudinary = async (req) => {
   const files = collectFiles(req);
   await Promise.all(
     files.map(async (file) => {
-      const result = await uploadToCloudinary(file.buffer, generateFileName(file));
+      const result = await uploadToCloudinary(
+        file.buffer,
+        generateFileName(file),
+      );
       file.filename = result.secure_url;
       file.path = result.secure_url;
       file.cloudinaryPublicId = result.public_id;
@@ -83,11 +99,20 @@ const pushToCloudinary = async (req) => {
 const withStorage = (multerMiddleware) => (req, res, next) => {
   multerMiddleware(req, res, (err) => {
     if (err) {
-      return next(err.code === "LIMIT_FILE_SIZE" ? new ApiError(400, "File is too large") : err);
+      return next(
+        err.code === "LIMIT_FILE_SIZE"
+          ? new ApiError(400, "File is too large")
+          : err,
+      );
     }
     if (!collectFiles(req).length) return next();
     if (!isCloudinaryEnabled) {
-      return next(new ApiError(500, "File storage is not configured (Cloudinary credentials missing)"));
+      return next(
+        new ApiError(
+          500,
+          "File storage is not configured (Cloudinary credentials missing)",
+        ),
+      );
     }
     pushToCloudinary(req).then(() => next(), next);
   });
@@ -119,7 +144,11 @@ const uploadUserDocuments = withStorage(
 const uploadMultiple = withStorage(createUpload().array("gallery_images", 10));
 
 const uploadAvatar = withStorage(
-  multer({ storage, limits: { fileSize: 2 * 1024 * 1024 }, fileFilter: imageOnlyFilter }).single("image"),
+  multer({
+    storage,
+    limits: { fileSize: 2 * 1024 * 1024 },
+    fileFilter: imageOnlyFilter,
+  }).single("image"),
 );
 
 module.exports = {

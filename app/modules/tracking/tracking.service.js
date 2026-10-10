@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const ApiError = require("../../../error/ApiError");
+const { getClientIp } = require("../../utils/clientIp");
 const FacebookPixelService = require("../facebookPixel/facebookPixel.service");
 const TiktokPixelService = require("../tiktokPixel/tiktokPixel.service");
 const GoogleAdsService = require("../googleAds/googleAds.service");
@@ -227,7 +228,7 @@ const trackEvent = async (payload, req) => {
   if (!eventName) throw new ApiError(400, "eventName is required");
   const eventId = payload.eventId || `${eventName}.${Date.now()}.${Math.random().toString(16).slice(2)}`;
   const context = {
-    ipAddress: req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip,
+    ipAddress: getClientIp(req),
     userAgent: req.headers["user-agent"],
   };
   const basePayload = { ...payload, eventName, eventId };
