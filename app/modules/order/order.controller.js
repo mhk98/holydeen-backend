@@ -28,6 +28,8 @@ const createOrder = catchAsync(async (req, res) => {
   if (req.body.landingTracking?.enabled === true) {
     const eventId = `Purchase.order.${result.Id || result.orderId}`;
     result.purchaseEventId = eventId;
+    result.purchaseValue = Number(result.totalBill);
+    result.purchaseCurrency = "BDT";
     void deliverPurchase({
       eventName: "Purchase",
       eventId,
