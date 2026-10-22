@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { Op } = require('sequelize');
-const { createCourierSyncWorker } = require('../app/modules/order/courierSync.worker');
+const { createCourierSyncWorker, withSyncLock, getMaxAgeDays } = require('../app/modules/order/courierSync.worker');
 
 test('worker paginates, isolates failures and prevents overlapping sweeps', async () => {
   const calls = [];
@@ -85,3 +85,75 @@ for (const provider of ['Steadfast', 'Pathao']) {
     assert.equal(delivered.writes(), 0);
   });
 }
+
+function lockSequelize(acquired, { failDisconnect = false } = {}) {
+  const state = { queries: [], connects: 0, disconnected: false, destroyed: false };
+  const connection = {
+    on(event, handler) { state.errorHandler = handler; },
+    query(sql, params, callback) { state.queries.push(sql); callback(null, [{ acquired }]); },
+    destroy() { state.destroyed = true; },
+  };
+  const sequelize = {
+    getDatabaseName: () => 'test',
+    connectionManager: {
+      config: { replication: false, host: 'db' },
+      async connect(config) { assert.equal(config.host, 'db'); state.connects++; return connection; },
+      async disconnect(c) {
+        assert.equal(c, connection);
+        if (failDisconnect) throw Error('already closed');
+        state.disconnected = true;
+      },
+      getConnection: async () => assert.fail('lock must not take a pooled connection'),
+    },
+  };
+  return { sequelize, state };
+}
+
+for (const acquired of [0, 1]) test(`sync lock acquired=${acquired} runs work once and always closes its own connection`, async () => {
+  const { sequelize, state } = lockSequelize(acquired);
+  let ran = 0;
+  const result = withSyncLock(sequelize, async () => { ran++; throw Error('sweep failed'); });
+  if (acquired) await assert.rejects(result, /sweep failed/); else await result;
+  assert.equal(ran, acquired);
+  assert.equal(state.connects, 1);
+  assert.deepEqual(state.queries, ['SELECT GET_LOCK(?, 0) AS acquired']);
+  assert.equal(state.disconnected, true);
+  assert.equal(typeof state.errorHandler, 'function');
+});
+
+test('sync lock destroys the session when a clean close fails', async () => {
+  const { sequelize, state } = lockSequelize(1, { failDisconnect: true });
+  await withSyncLock(sequelize, async () => {});
+  assert.equal(state.destroyed, true);
+});
+
+test('worker skips the sweep when another process holds the lock', async () => {
+  let pages = 0;
+  const worker = createCourierSyncWorker({
+    Order: { async findAll() { pages++; return []; } },
+    service: {}, logger: { warn() {}, error() {} },
+    lock: async () => {},
+  });
+  await worker.run();
+  assert.equal(pages, 0);
+  await worker.stop();
+});
+
+test('worker only sweeps orders created within the max age window', async () => {
+  let createdAfter;
+  const now = Date.parse('2026-10-22T00:00:00Z');
+  const worker = createCourierSyncWorker({
+    Order: { async findAll({ where }) { createdAfter = where.createdAt[Op.gte]; return []; } },
+    service: {}, logger: { warn() {}, error() {} }, maxAgeDays: 30, now: () => now,
+  });
+  await worker.run();
+  assert.equal(createdAfter.toISOString(), '2026-09-22T00:00:00.000Z');
+  await worker.stop();
+});
+
+test('max age comes from COURIER_SYNC_MAX_AGE_DAYS and falls back to 30 days', () => {
+  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: '45' }), 45);
+  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: 'abc' }), 30);
+  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: '0' }), 30);
+  assert.equal(getMaxAgeDays({}), 30);
+});
