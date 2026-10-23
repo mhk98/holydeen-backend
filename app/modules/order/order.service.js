@@ -3,20 +3,13 @@ const { Op, fn, col, literal } = require("sequelize");
 const db = require("../../../models");
 const ApiError = require("../../../error/ApiError");
 const paginationHelpers = require("../../../helpers/paginationHelper");
-const {
-  ORDER_STATUS_VALUES,
-  ORDER_SEARCHABLE_FIELDS,
-} = require("./order.constants");
+const { ORDER_STATUS_VALUES, ORDER_SEARCHABLE_FIELDS } = require("./order.constants");
 const SiteSettingService = require("../siteSetting/siteSetting.service");
 const OrderStatusService = require("../orderStatus/orderStatus.service");
 const CouponCodeService = require("../couponCode/couponCode.service");
 const NotificationService = require("../notification/notification.service");
 const SmsMarketingService = require("../smsMarketing/smsMarketing.service");
-const {
-  priceOrderItems,
-  resolveStaffItems,
-  calculateStaffTotals,
-} = require("./orderPricing");
+const { priceOrderItems, resolveStaffItems, calculateStaffTotals } = require("./orderPricing");
 const { registerOrderStockHooks } = require("./orderStock");
 
 const Order = db.order;
@@ -49,10 +42,7 @@ const normalizeIpAddress = (value) =>
 
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
 
-const normalizeRole = (value) =>
-  String(value || "")
-    .trim()
-    .toLowerCase();
+const normalizeRole = (value) => String(value || "").trim().toLowerCase();
 
 const getUserDisplayName = (user = {}) =>
   [user.FirstName, user.LastName].filter(Boolean).join(" ").trim() ||
@@ -99,7 +89,10 @@ const applyOrderAssignmentScope = (where, user = {}) => {
   if (!user?.Id || canSeeAllAssignedOrders(user)) return where;
   if (normalizeRole(user.role) === "employee") {
     return {
-      [Op.and]: [where, { assignedEmployeeId: Number(user.Id) }],
+      [Op.and]: [
+        where,
+        { assignedEmployeeId: Number(user.Id) },
+      ],
     };
   }
   return where;
@@ -172,9 +165,7 @@ const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const hashOrderOtp = (orderId, phone, otp) =>
   crypto
     .createHash("sha256")
-    .update(
-      `${orderId}:${normalizePhone(phone)}:${otp}:${process.env.JWT_SECRET || process.env.JWT_REFRESH_SECRET || "kafela-order-otp"}`,
-    )
+    .update(`${orderId}:${normalizePhone(phone)}:${otp}:${process.env.JWT_SECRET || process.env.JWT_REFRESH_SECRET || "kafela-order-otp"}`)
     .digest("hex");
 
 const toPublicOrder = (order) => {
@@ -182,21 +173,17 @@ const toPublicOrder = (order) => {
   const meta = parseOrderMeta(plain.note);
   const items = Array.isArray(meta.items)
     ? meta.items
-    : [
-        {
-          name: plain.productName,
-          image: plain.productImage || undefined,
-          qty: plain.quantity || 1,
-          price: Number(plain.totalBill || 0),
-        },
-      ];
+    : [{
+        name: plain.productName,
+        image: plain.productImage || undefined,
+        qty: plain.quantity || 1,
+        price: Number(plain.totalBill || 0),
+      }];
 
   return {
     ...withAssignmentUsers(plain),
     invoiceId: orderIdVariants(plain.orderId)[0] || plain.orderId,
-    customerAddress:
-      meta.customerAddress ||
-      [plain.customerArea, plain.customerDistrict].filter(Boolean).join(", "),
+    customerAddress: meta.customerAddress || [plain.customerArea, plain.customerDistrict].filter(Boolean).join(", "),
     paymentMethod: meta.paymentMethod || "cod",
     paymentStatus: meta.paymentStatus || "pending",
     items,
@@ -207,20 +194,15 @@ const toPublicOrder = (order) => {
 };
 
 const normalizeFraudStatus = (value) => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
+  const normalized = String(value || "").trim().toLowerCase();
   if (["fake", "fake_order"].includes(normalized)) return "fake";
   if (["safe", "clear"].includes(normalized)) return "safe";
-  if (["high_risk", "high-risk", "risk"].includes(normalized))
-    return "high_risk";
+  if (["high_risk", "high-risk", "risk"].includes(normalized)) return "high_risk";
   return "";
 };
 
 const unitToMs = (unit) => {
-  const normalized = String(unit || "hour")
-    .trim()
-    .toLowerCase();
+  const normalized = String(unit || "hour").trim().toLowerCase();
   if (normalized.startsWith("min")) return 60 * 1000;
   if (normalized.startsWith("day")) return 24 * 60 * 60 * 1000;
   if (normalized.startsWith("month")) return 30 * 24 * 60 * 60 * 1000;
@@ -231,35 +213,21 @@ const formatDuration = (blockTime, timeUnit) =>
   `${blockTime} ${timeUnit || "Hour"}`;
 
 const normalizeRuleKey = (value) => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
+  const normalized = String(value || "").trim().toLowerCase();
   if (["same_ip", "sameip", "ip"].includes(normalized)) return "same_ip";
-  if (["same_device", "samedevice", "device"].includes(normalized))
-    return "same_device";
-  if (["invalid_phone", "invalidphone", "phone"].includes(normalized))
-    return "invalid_phone";
-  if (
-    [
-      "suspicious_address",
-      "fake_address",
-      "address",
-      "unknown_address",
-    ].includes(normalized)
-  ) {
+  if (["same_device", "samedevice", "device"].includes(normalized)) return "same_device";
+  if (["invalid_phone", "invalidphone", "phone"].includes(normalized)) return "invalid_phone";
+  if (["suspicious_address", "fake_address", "address", "unknown_address"].includes(normalized)) {
     return "suspicious_address";
   }
   return "";
 };
 
 const normalizeDurationUnit = (value) => {
-  const normalized = String(value || "hour")
-    .trim()
-    .toLowerCase();
+  const normalized = String(value || "hour").trim().toLowerCase();
   if (normalized.startsWith("day")) return "Day";
   if (normalized.startsWith("month")) return "Month";
-  if (normalized.startsWith("unknown") || normalized.startsWith("permanent"))
-    return "Unknown";
+  if (normalized.startsWith("unknown") || normalized.startsWith("permanent")) return "Unknown";
   return "Hour";
 };
 
@@ -291,18 +259,14 @@ const normalizeOrderBlockRules = (data = {}) => {
     .map((rule) => ({
       key: normalizeRuleKey(rule.key || rule.type || rule.category),
       enabled: rule.enabled !== false && rule.status !== false,
-      durationValue: Number(
-        rule.durationValue || rule.blockTime || rule.time || 1,
-      ),
+      durationValue: Number(rule.durationValue || rule.blockTime || rule.time || 1),
       durationUnit: normalizeDurationUnit(rule.durationUnit || rule.timeUnit),
     }))
     .filter((rule) => rule.key && rule.enabled);
 };
 
 const getOrderBlockRuleSettings = async () => {
-  const row = await SiteSettingService.getByType("order_block").catch(
-    () => null,
-  );
+  const row = await SiteSettingService.getByType("order_block").catch(() => null);
   const data = row?.data || {};
   if (data.status === false) return [];
   return normalizeOrderBlockRules(data);
@@ -357,8 +321,7 @@ const isSuspiciousAddress = (value) => {
   if (lettersAndDigits.length >= 8 && uniqueChars <= 3) return true;
   if (/(.)\1{5,}/u.test(lettersAndDigits)) return true;
   if (/^(.)\1+$/u.test(lettersAndDigits)) return true;
-  if (/^[a-z]{8,}$/i.test(normalized) && !/[aeiou]/i.test(normalized))
-    return true;
+  if (/^[a-z]{8,}$/i.test(normalized) && !/[aeiou]/i.test(normalized)) return true;
 
   return false;
 };
@@ -366,8 +329,7 @@ const isSuspiciousAddress = (value) => {
 const getActiveBlockWhere = ({ ipAddress, deviceId }) => {
   const identityConditions = [];
   const ipVariants = getIpVariants(ipAddress);
-  if (ipVariants.length)
-    identityConditions.push({ ip: { [Op.in]: ipVariants } });
+  if (ipVariants.length) identityConditions.push({ ip: { [Op.in]: ipVariants } });
   if (deviceId) identityConditions.push({ deviceId });
   if (!identityConditions.length) return null;
 
@@ -375,25 +337,21 @@ const getActiveBlockWhere = ({ ipAddress, deviceId }) => {
     [Op.and]: [
       { [Op.or]: identityConditions },
       {
-        [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date() } }],
+        [Op.or]: [
+          { expiresAt: null },
+          { expiresAt: { [Op.gt]: new Date() } },
+        ],
       },
     ],
   };
 };
 
-const createTimedIpBlock = async ({
-  ipAddress,
-  deviceId,
-  settings,
-  rule,
-  reason,
-}) => {
+const createTimedIpBlock = async ({ ipAddress, deviceId, settings, rule, reason }) => {
   if (!IpBlock || (!ipAddress && !deviceId)) return null;
 
   const ip = normalizeIpAddress(ipAddress) || `device:${deviceId}`;
   const durationMs = settings?.blockDurationMs ?? getRuleDurationMs(rule);
-  const expiresAt =
-    durationMs === null ? null : new Date(Date.now() + durationMs);
+  const expiresAt = durationMs === null ? null : new Date(Date.now() + durationMs);
   const where = getActiveBlockWhere({ ipAddress: ip, deviceId });
   const existing = where
     ? await IpBlock.findOne({ where, paranoid: true })
@@ -524,11 +482,9 @@ const enforceOrderBlockLimit = async (payload = {}) => {
 
   const since = new Date(Date.now() - settings.blockDurationMs);
   const orConditions = [];
-  if (customerPhone)
-    orConditions.push({ customerPhone: String(customerPhone).trim() });
+  if (customerPhone) orConditions.push({ customerPhone: String(customerPhone).trim() });
   const ipVariants = getIpVariants(ipAddress);
-  if (ipVariants.length)
-    orConditions.push({ ipAddress: { [Op.in]: ipVariants } });
+  if (ipVariants.length) orConditions.push({ ipAddress: { [Op.in]: ipVariants } });
   if (deviceId) orConditions.push({ deviceId });
   if (!orConditions.length) return;
 
@@ -562,9 +518,7 @@ const parseJsonObject = (value) => {
   if (!value || typeof value !== "string") return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -573,18 +527,12 @@ const parseJsonObject = (value) => {
 const getSteadfastConfig = async () => {
   const settings = await SiteSettingService.getByType("courier_api");
   const config = settings?.data?.steadfast || {};
-  if (config.status === false)
-    throw new ApiError(400, "Steadfast courier API is disabled");
-  if (
-    !String(config.apiKey || "").trim() ||
-    !String(config.secretKey || "").trim()
-  ) {
+  if (config.status === false) throw new ApiError(400, "Steadfast courier API is disabled");
+  if (!String(config.apiKey || "").trim() || !String(config.secretKey || "").trim()) {
     throw new ApiError(400, "Steadfast API key and secret key are required");
   }
 
-  const rawUrl = String(
-    config.url || "https://portal.packzy.com/api/v1",
-  ).trim();
+  const rawUrl = String(config.url || "https://portal.packzy.com/api/v1").trim();
   const baseUrl = rawUrl
     .replace(/\/create_order(?:\/bulk-order)?\/?$/i, "")
     .replace(/\/api\/v1\/?$/i, "/api/v1")
@@ -600,13 +548,10 @@ const getSteadfastConfig = async () => {
 const getPathaoConfig = async () => {
   const settings = await SiteSettingService.getByType("courier_api");
   const config = settings?.data?.pathao || {};
-  if (config.status === false)
-    throw new ApiError(400, "Pathao courier API is disabled");
+  if (config.status === false) throw new ApiError(400, "Pathao courier API is disabled");
 
   const clientId = String(config.clientId || config.apiKey || "").trim();
-  const clientSecret = String(
-    config.clientSecret || config.secretKey || "",
-  ).trim();
+  const clientSecret = String(config.clientSecret || config.secretKey || "").trim();
   const username = String(config.username || config.email || "").trim();
   const password = String(config.password || "").trim();
   const storeId = Number(config.storeId || config.store_id || 0);
@@ -617,11 +562,7 @@ const getPathaoConfig = async () => {
   if (!username) missing.push("username");
   if (!password) missing.push("password");
   if (!storeId) missing.push("storeId");
-  if (missing.length)
-    throw new ApiError(
-      400,
-      `Pathao credential(s) required: ${missing.join(", ")}`,
-    );
+  if (missing.length) throw new ApiError(400, `Pathao credential(s) required: ${missing.join(", ")}`);
 
   const rawUrl = String(config.url || "https://api-hermes.pathao.com").trim();
   const baseUrl = rawUrl
@@ -639,13 +580,23 @@ const getPathaoConfig = async () => {
     deliveryType: Number(config.deliveryType || 48),
     itemType: Number(config.itemType || 2),
     itemWeight: Number(config.itemWeight || 0.5),
-    recipientCity:
-      Number(config.recipientCity || config.cityId || 0) || undefined,
-    recipientZone:
-      Number(config.recipientZone || config.zoneId || 0) || undefined,
-    recipientArea:
-      Number(config.recipientArea || config.areaId || 0) || undefined,
+    recipientCity: Number(config.recipientCity || config.cityId || 0) || undefined,
+    recipientZone: Number(config.recipientZone || config.zoneId || 0) || undefined,
+    recipientArea: Number(config.recipientArea || config.areaId || 0) || undefined,
   };
+};
+
+// fetch() rejects with an AbortError when our 15s timer fires; report it as a
+// courier timeout instead of letting it surface as "Internal server error".
+const courierFetch = async (provider, url, options) => {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new ApiError(504, `${provider} did not respond within 15 seconds (${new URL(url).origin}). Check the ${provider} API URL in Courier API settings.`);
+    }
+    throw new ApiError(502, `Could not reach ${provider}: ${error?.cause?.code || error.message}`);
+  }
 };
 
 const steadfastRequest = async (path, { method = "GET", body } = {}) => {
@@ -653,7 +604,7 @@ const steadfastRequest = async (path, { method = "GET", body } = {}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(`${config.baseUrl}${path}`, {
+    const response = await courierFetch("Steadfast", `${config.baseUrl}${path}`, {
       method,
       signal: controller.signal,
       headers: {
@@ -672,10 +623,7 @@ const steadfastRequest = async (path, { method = "GET", body } = {}) => {
       data = text;
     }
     if (!response.ok || (data?.status && Number(data.status) >= 400)) {
-      throw new ApiError(
-        response.status || 400,
-        data?.message || "Steadfast request failed",
-      );
+      throw new ApiError(response.status || 400, data?.message || "Steadfast request failed");
     }
     return data;
   } finally {
@@ -683,28 +631,22 @@ const steadfastRequest = async (path, { method = "GET", body } = {}) => {
   }
 };
 
-const pathaoToken = async (config) => {
+const issuePathaoToken = async (config) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(
-      `${config.baseUrl}/aladdin/api/v1/issue-token`,
-      {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          client_id: config.clientId,
-          client_secret: config.clientSecret,
-          username: config.username,
-          password: config.password,
-          grant_type: "password",
-        }),
-      },
-    );
+    const response = await courierFetch("Pathao", `${config.baseUrl}/aladdin/api/v1/issue-token`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        username: config.username,
+        password: config.password,
+        grant_type: "password",
+      }),
+    });
     const text = await response.text();
     let data;
     try {
@@ -713,30 +655,63 @@ const pathaoToken = async (config) => {
       data = text;
     }
     if (!response.ok || data?.type === "error") {
-      throw new ApiError(
-        response.status || 400,
-        data?.message || "Pathao token request failed",
-      );
+      throw new ApiError(response.status || 400, data?.message || "Pathao token request failed");
     }
     const token = data?.access_token || data?.data?.access_token || data?.token;
-    if (!token)
-      throw new ApiError(400, "Pathao access token missing from response");
-    return token;
+    if (!token) throw new ApiError(400, "Pathao access token missing from response");
+    const expiresIn = Number(data?.expires_in || data?.data?.expires_in) || 3600;
+    return { token, expiresAt: Date.now() + expiresIn * 1000 };
   } finally {
     clearTimeout(timer);
   }
 };
 
-const pathaoRequest = async (
-  path,
-  { method = "GET", body, config, token } = {},
-) => {
-  const resolvedConfig = config || (await getPathaoConfig());
-  const accessToken = token || (await pathaoToken(resolvedConfig));
+// Issuing a token per request doubles the calls and trips Pathao's rate limit,
+// so reuse it until shortly before it expires. Concurrent callers share one issue.
+const pathaoTokenCache = new Map();
+const pathaoTokenKey = (config) => [config.baseUrl, config.clientId, config.username].join("|");
+
+const pathaoToken = async (config) => {
+  const key = pathaoTokenKey(config);
+  const cached = pathaoTokenCache.get(key);
+  if (cached && (cached.pending || cached.expiresAt - 60000 > Date.now())) {
+    return cached.pending || cached.token;
+  }
+  const pending = issuePathaoToken(config).then((issued) => {
+    pathaoTokenCache.set(key, issued);
+    return issued.token;
+  }, (error) => {
+    pathaoTokenCache.delete(key);
+    throw error;
+  });
+  pathaoTokenCache.set(key, { pending });
+  return pending;
+};
+
+const clearPathaoToken = (config, token) => {
+  const key = pathaoTokenKey(config);
+  if (pathaoTokenCache.get(key)?.token === token) pathaoTokenCache.delete(key);
+};
+
+const pathaoRequest = async (path, options = {}) => {
+  const config = options.config || await getPathaoConfig();
+  const token = options.token || await pathaoToken(config);
+  try {
+    return await sendPathaoRequest(path, { ...options, config, token });
+  } catch (error) {
+    // A cached token can be revoked before it expires; issue a fresh one once.
+    if (error?.statusCode !== 401) throw error;
+    clearPathaoToken(config, token);
+    if (options.token) throw error;
+    return sendPathaoRequest(path, { ...options, config, token: await pathaoToken(config) });
+  }
+};
+
+const sendPathaoRequest = async (path, { method = "GET", body, config: resolvedConfig, token: accessToken }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(`${resolvedConfig.baseUrl}${path}`, {
+    const response = await courierFetch("Pathao", `${resolvedConfig.baseUrl}${path}`, {
       method,
       signal: controller.signal,
       headers: {
@@ -754,10 +729,7 @@ const pathaoRequest = async (
       data = text;
     }
     if (!response.ok || data?.type === "error") {
-      throw new ApiError(
-        response.status || 400,
-        data?.message || "Pathao request failed",
-      );
+      throw new ApiError(response.status || 400, data?.message || "Pathao request failed");
     }
     return data;
   } finally {
@@ -771,6 +743,8 @@ const pathaoRequestFirst = async (paths, options = {}) => {
     try {
       return await pathaoRequest(path, options);
     } catch (error) {
+      // The fallback path would only be rate limited too.
+      if (error?.statusCode === 429) throw error;
       lastError = error;
     }
   }
@@ -779,8 +753,7 @@ const pathaoRequestFirst = async (paths, options = {}) => {
 
 const normalizeCourierPhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
-  if (digits.length === 13 && digits.startsWith("880"))
-    return `0${digits.slice(3)}`;
+  if (digits.length === 13 && digits.startsWith("880")) return `0${digits.slice(3)}`;
   if (digits.length === 10 && digits.startsWith("1")) return `0${digits}`;
   return digits;
 };
@@ -800,10 +773,7 @@ const getOrderAddressForCourier = (order) => {
   return (
     toCourierAddressPart(meta.customerAddress) ||
     toCourierAddressPart(order.customerAddress) ||
-    [order.customerArea, order.customerDistrict]
-      .map(toCourierAddressPart)
-      .filter(Boolean)
-      .join(", ")
+    [order.customerArea, order.customerDistrict].map(toCourierAddressPart).filter(Boolean).join(", ")
   ).trim();
 };
 
@@ -816,8 +786,7 @@ const getOrderAdminNoteText = (order) => {
       .join("; ")
       .slice(0, 250);
   }
-  if (order.note && !Object.keys(meta).length)
-    return String(order.note).slice(0, 250);
+  if (order.note && !Object.keys(meta).length) return String(order.note).slice(0, 250);
   return "";
 };
 
@@ -832,33 +801,22 @@ const getOrderDueAmount = (order) => {
 const buildSteadfastOrderPayload = (order, options = {}) => {
   const phone = normalizeCourierPhone(order.customerPhone);
   if (!/^01\d{9}$/.test(phone)) {
-    throw new ApiError(
-      400,
-      "Valid 11 digit recipient phone is required for Steadfast",
-    );
+    throw new ApiError(400, "Valid 11 digit recipient phone is required for Steadfast");
   }
 
   const recipientAddress = getOrderAddressForCourier(order);
-  if (!recipientAddress)
-    throw new ApiError(400, "Recipient address is required for Steadfast");
+  if (!recipientAddress) throw new ApiError(400, "Recipient address is required for Steadfast");
 
   return {
     invoice: order.orderId,
     recipient_name: String(order.customerName || "Customer").slice(0, 100),
     recipient_phone: phone,
-    alternative_phone: options.alternativePhone
-      ? normalizeCourierPhone(options.alternativePhone)
-      : undefined,
+    alternative_phone: options.alternativePhone ? normalizeCourierPhone(options.alternativePhone) : undefined,
     recipient_email: options.recipientEmail || undefined,
     recipient_address: recipientAddress.slice(0, 250),
     cod_amount: Number(options.codAmount ?? getOrderDueAmount(order)),
-    note:
-      String(options.note || getOrderAdminNoteText(order) || "").slice(
-        0,
-        250,
-      ) || undefined,
-    item_description:
-      String(order.productName || "").slice(0, 250) || undefined,
+    note: String(options.note || getOrderAdminNoteText(order) || "").slice(0, 250) || undefined,
+    item_description: String(order.productName || "").slice(0, 250) || undefined,
     total_lot: Number(options.totalLot || order.quantity || 1),
     delivery_type: Number(options.deliveryType ?? 0),
   };
@@ -867,18 +825,12 @@ const buildSteadfastOrderPayload = (order, options = {}) => {
 const buildPathaoOrderPayload = (order, config, options = {}) => {
   const phone = normalizeCourierPhone(order.customerPhone);
   if (!/^01\d{9}$/.test(phone)) {
-    throw new ApiError(
-      400,
-      "Valid 11 digit recipient phone is required for Pathao",
-    );
+    throw new ApiError(400, "Valid 11 digit recipient phone is required for Pathao");
   }
 
   const recipientAddress = getOrderAddressForCourier(order);
   if (recipientAddress.length < 10) {
-    throw new ApiError(
-      400,
-      "Recipient address must be at least 10 characters for Pathao",
-    );
+    throw new ApiError(400, "Recipient address must be at least 10 characters for Pathao");
   }
 
   return {
@@ -886,20 +838,14 @@ const buildPathaoOrderPayload = (order, config, options = {}) => {
     merchant_order_id: order.orderId,
     recipient_name: String(order.customerName || "Customer").slice(0, 100),
     recipient_phone: phone,
-    recipient_secondary_phone: options.alternativePhone
-      ? normalizeCourierPhone(options.alternativePhone)
-      : undefined,
+    recipient_secondary_phone: options.alternativePhone ? normalizeCourierPhone(options.alternativePhone) : undefined,
     recipient_address: recipientAddress.slice(0, 220),
     recipient_city: options.recipientCity || config.recipientCity,
     recipient_zone: options.recipientZone || config.recipientZone,
     recipient_area: options.recipientArea || config.recipientArea,
     delivery_type: Number(options.deliveryType || config.deliveryType || 48),
     item_type: Number(options.itemType || config.itemType || 2),
-    special_instruction:
-      String(options.note || getOrderAdminNoteText(order) || "").slice(
-        0,
-        250,
-      ) || undefined,
+    special_instruction: String(options.note || getOrderAdminNoteText(order) || "").slice(0, 250) || undefined,
     item_quantity: Number(options.itemQuantity || order.quantity || 1),
     item_weight: Number(options.itemWeight || config.itemWeight || 0.5),
     item_description: String(order.productName || "Parcel").slice(0, 250),
@@ -918,71 +864,56 @@ const mapSteadfastStatusToOrderStatus = (status) => {
   if (key === "delivered") {
     return "delivered";
   }
-  if (["cancelled", "cancelled_approval_pending"].includes(key))
-    return "cancelled";
+  if (["cancelled", "cancelled_approval_pending"].includes(key)) return "cancelled";
   if (key === "partial_delivered") return "returned";
   if (key === "hold") return "on_hold";
-  if (
-    [
-      "pending",
-      "in_review",
-      "delivered_approval_pending",
-      "partial_delivered_approval_pending",
-      "unknown",
-      "unknown_approval_pending",
-    ].includes(key)
-  )
-    return "in_courier";
+  if ([
+    "pending",
+    "in_review",
+    "delivered_approval_pending",
+    "partial_delivered_approval_pending",
+    "unknown",
+    "unknown_approval_pending",
+  ].includes(key)) return "in_courier";
   return null;
 };
 
 const mapPathaoStatusToOrderStatus = (status) => {
-  const key = String(status || "")
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  const key = String(status || "").toLowerCase().replace(/\s+/g, "_");
   if (["delivered", "order_delivered"].includes(key)) return "delivered";
-  if (
-    [
-      "cancelled",
-      "cancel",
-      "rejected",
-      "pickup_cancelled",
-      "order_cancelled",
-      "order_pickup_cancelled",
-    ].includes(key)
-  )
-    return "cancelled";
-  if (
-    [
-      "returned",
-      "return",
-      "return_to_merchant",
-      "returned_to_merchant",
-      "partial_delivery",
-      "partial_delivered",
-      "partial_return",
-      "paid_return",
-      "order_returned",
-      "order_paid_return",
-      "order_partial_delivery",
-      "order_partial_delivered",
-      "order_returned_to_merchant",
-    ].includes(key)
-  )
-    return "returned";
-  if (
-    [
-      "hold",
-      "on_hold",
-      "delivery_failed",
-      "pickup_failed",
-      "order_hold",
-      "order_on_hold",
-      "order_delivery_failed",
-      "order_pickup_failed",
-    ].includes(key)
-  )
-    return "on_hold";
+  if ([
+    "cancelled",
+    "cancel",
+    "rejected",
+    "pickup_cancelled",
+    "order_cancelled",
+    "order_pickup_cancelled",
+  ].includes(key)) return "cancelled";
+  if ([
+    "returned",
+    "return",
+    "return_to_merchant",
+    "returned_to_merchant",
+    "partial_delivery",
+    "partial_delivered",
+    "partial_return",
+    "paid_return",
+    "order_returned",
+    "order_paid_return",
+    "order_partial_delivery",
+    "order_partial_delivered",
+    "order_returned_to_merchant",
+  ].includes(key)) return "returned";
+  if ([
+    "hold",
+    "on_hold",
+    "delivery_failed",
+    "pickup_failed",
+    "order_hold",
+    "order_on_hold",
+    "order_delivery_failed",
+    "order_pickup_failed",
+  ].includes(key)) return "on_hold";
   if (key) return "in_courier";
   return null;
 };
@@ -993,9 +924,7 @@ const canSendToCourier = (order) =>
 const mergeCourierMeta = (order, provider, data = {}) => {
   const meta = getOrderMeta(order);
   return JSON.stringify({
-    ...(!Object.keys(meta).length && order.note
-      ? { legacyNote: order.note }
-      : {}),
+    ...(!Object.keys(meta).length && order.note ? { legacyNote: order.note } : {}),
     ...meta,
     courierIntegration: {
       ...(meta.courierIntegration || {}),
@@ -1008,10 +937,8 @@ const mergeCourierMeta = (order, provider, data = {}) => {
   });
 };
 
-const getSteadfastMeta = (order) =>
-  getOrderMeta(order).courierIntegration?.steadfast || {};
-const getPathaoMeta = (order) =>
-  getOrderMeta(order).courierIntegration?.pathao || {};
+const getSteadfastMeta = (order) => getOrderMeta(order).courierIntegration?.steadfast || {};
+const getPathaoMeta = (order) => getOrderMeta(order).courierIntegration?.pathao || {};
 
 const getOrderForCourier = async (id) => {
   const order = await Order.findByPk(id);
@@ -1028,35 +955,18 @@ const checkoutKeyFromPayload = (payload) => {
   return key;
 };
 
-const withOrderWriteLock = (work) =>
-  db.sequelize.transaction(async (transaction) => {
-    const lock = await db.orderWriteLock.findByPk(1, {
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!lock)
-      throw new ApiError(503, "Order storage is initializing. Please retry.");
-    return work(transaction);
-  });
+const withOrderWriteLock = (work) => db.sequelize.transaction(async (transaction) => {
+  const lock = await db.orderWriteLock.findByPk(1, { transaction, lock: transaction.LOCK.UPDATE });
+  if (!lock) throw new ApiError(503, "Order storage is initializing. Please retry.");
+  return work(transaction);
+});
 
 const getIncompleteOrderFromPayload = async (payload = {}, transaction) => {
   const checkoutKey = checkoutKeyFromPayload(payload);
   if (checkoutKey) {
-    const existing = await Order.findOne({
-      where: { checkoutKey },
-      transaction,
-      paranoid: false,
-    });
-    if (existing?.deletedAt)
-      throw new ApiError(
-        409,
-        "This checkout was deleted. Start a new checkout.",
-      );
-    if (
-      existing &&
-      String(existing.customerPhone).trim() !==
-        String(payload.customerPhone).trim()
-    ) {
+    const existing = await Order.findOne({ where: { checkoutKey }, transaction, paranoid: false });
+    if (existing?.deletedAt) throw new ApiError(409, "This checkout was deleted. Start a new checkout.");
+    if (existing && String(existing.customerPhone).trim() !== String(payload.customerPhone).trim()) {
       throw new ApiError(409, "Checkout phone does not match");
     }
     if (existing) return existing;
@@ -1064,21 +974,17 @@ const getIncompleteOrderFromPayload = async (payload = {}, transaction) => {
     return null;
   }
   const phone = String(payload.customerPhone || "").trim();
-  const incompleteOrderId = Number(
-    payload.incompleteOrderId || payload.draftOrderId || 0,
-  );
+  const incompleteOrderId = Number(payload.incompleteOrderId || payload.draftOrderId || 0);
   if (incompleteOrderId && phone) {
     const order = await Order.findOne({
-      where: { Id: incompleteOrderId, customerPhone: phone },
-      transaction,
+      where: { Id: incompleteOrderId, customerPhone: phone }, transaction,
     });
     if (order) return order; // Completed drafts must never become incomplete again.
   }
   if (!phone) return null;
   return Order.findOne({
     where: { customerPhone: phone, status: "incomplete" },
-    order: [["Id", "DESC"]],
-    transaction,
+    order: [["Id", "DESC"]], transaction,
   });
 };
 
@@ -1086,8 +992,7 @@ const applyOrderCoupon = async (payload = {}) => {
   if (!Array.isArray(payload.items)) return payload;
 
   const itemSubtotal = calculateItemsSubtotal(payload.items);
-  const subtotal =
-    itemSubtotal > 0 ? itemSubtotal : Number(payload.subtotal || 0);
+  const subtotal = itemSubtotal > 0 ? itemSubtotal : Number(payload.subtotal || 0);
   const deliveryCharge = Number(payload.deliveryCharge || 0);
   let discount = 0;
   let couponCode = null;
@@ -1113,29 +1018,9 @@ const applyOrderCoupon = async (payload = {}) => {
 
 const buildItemsProductName = (items = []) =>
   items
-    .map(
-      (item) =>
-        `${item.name}${item.variant ? ` (${item.variant})` : ""} x${item.qty || 1}`,
-    )
+    .map((item) => `${item.name}${item.variant ? ` (${item.variant})` : ""} x${item.qty || 1}`)
     .join(", ")
     .slice(0, 255);
-
-const resolveOrderTotal = (payload = {}) => {
-  const rawTotal = payload.total ?? payload.subtotal ?? 0;
-
-  // Prevent missing or invalid order totals.
-  if (rawTotal === "" || typeof rawTotal === "boolean" || rawTotal === null) {
-    throw new ApiError(400, "Invalid order total");
-  }
-
-  const total = Number(rawTotal);
-
-  if (!Number.isFinite(total) || total < 0) {
-    throw new ApiError(400, "Invalid order total");
-  }
-
-  return total;
-};
 
 const normalizeCreatePayload = ({ stockLedger, ...payload }) => {
   const orderSource = payload.orderSource || payload.source || "Website";
@@ -1148,18 +1033,14 @@ const normalizeCreatePayload = ({ stockLedger, ...payload }) => {
   }
 
   const items = payload.items;
-  const quantity =
-    items.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 1;
+  const quantity = items.reduce((sum, item) => sum + Number(item.qty || 0), 0) || 1;
   const firstItem = items[0] || {};
   const productName = buildItemsProductName(items);
   const meta = {
     __frontendOrder: true,
     customerAddress: payload.customerAddress || "",
     paymentMethod: payload.paymentMethod || "cod",
-    paymentStatus:
-      payload.paymentMethod && payload.paymentMethod !== "cod"
-        ? "unverified"
-        : "pending",
+    paymentStatus: payload.paymentMethod && payload.paymentMethod !== "cod" ? "unverified" : "pending",
     items,
     subtotal: Number(payload.subtotal || 0),
     deliveryCharge: Number(payload.deliveryCharge || 0),
@@ -1182,8 +1063,7 @@ const normalizeCreatePayload = ({ stockLedger, ...payload }) => {
     productName: productName || "Website Order",
     productImage: firstItem.image || null,
     quantity,
-    // totalBill: Number(payload.total || payload.subtotal || 0),
-    totalBill: resolveOrderTotal(payload),
+    totalBill: Number(payload.total || payload.subtotal || 0),
     advance: Number(payload.advance || 0),
     orderSource,
     status: "pending",
@@ -1196,9 +1076,7 @@ const extractOrderSourceFromNote = (note) => {
   if (!note || typeof note !== "string") return "";
   try {
     const meta = JSON.parse(note);
-    return String(
-      meta.orderSource || meta.source || meta.platform || "",
-    ).trim();
+    return String(meta.orderSource || meta.source || meta.platform || "").trim();
   } catch (error) {
     return "";
   }
@@ -1222,60 +1100,41 @@ const createOrderInDB = async (payload, options = {}) => {
     }
   }
   const pricedPayload = await priceOrderItems(payload, { strict: true });
-  const checkedPayload = await applyOrderCoupon({
-    ...pricedPayload,
-    ipAddress,
-    deviceId,
-  });
+  const checkedPayload = await applyOrderCoupon({ ...pricedPayload, ipAddress, deviceId });
   const normalizedPayload = normalizeCreatePayload(checkedPayload);
   // Run settings checks before taking the write lock: they use their own DB connection.
   // Replays are resolved first below, so an already saved checkout can still be retrieved.
   let blockError;
-  try {
-    await enforceOrderBlockLimit(checkedPayload);
-  } catch (error) {
-    blockError = error;
-  }
+  try { await enforceOrderBlockLimit(checkedPayload); } catch (error) { blockError = error; }
   const { order, created } = await withOrderWriteLock(async (transaction) => {
-    const existing = options.orderId
-      ? await Order.findOne({
-          where: { orderId: options.orderId },
-          transaction,
-        })
-      : await getIncompleteOrderFromPayload(checkedPayload, transaction);
-    if (existing && existing.status !== "incomplete")
-      return { order: existing, created: false };
+    const existing = options.orderId ? await Order.findOne({
+      where: { orderId: options.orderId }, transaction,
+    }) : await getIncompleteOrderFromPayload(checkedPayload, transaction);
+    if (existing && existing.status !== "incomplete") return { order: existing, created: false };
     if (blockError) throw blockError;
     if (existing) {
-      await existing.update(
-        { ...normalizedPayload, status: "pending" },
-        { transaction },
-      );
+      await existing.update({ ...normalizedPayload, status: "pending" }, { transaction });
       return { order: existing, created: true };
     }
-    const orderId = options.orderId || (await generateOrderId(transaction));
-    const order = await Order.create(
-      {
-        ...normalizedPayload,
-        orderId,
-        checkoutKey: checkoutKeyFromPayload(checkedPayload),
-      },
-      { transaction },
-    );
+    const orderId = options.orderId || await generateOrderId(transaction);
+    const order = await Order.create({
+      ...normalizedPayload, orderId, checkoutKey: checkoutKeyFromPayload(checkedPayload),
+    }, { transaction });
     return { order, created: true };
   });
   if (!created) return toPublicOrder(order);
 
-  await NotificationService.createForRoles(["superAdmin", "admin", "cs"], {
-    title: "New order received",
-    message: `${order.orderId} — ${order.customerName || "Customer"} — ৳${Number(order.totalBill || 0).toFixed(2)}`,
-    type: "order_created",
-    priority: "high",
-    url: "/#page=orders&orderStatus=pending",
-    data: { orderId: order.Id, invoiceId: order.orderId },
-  }).catch((error) =>
-    console.error("Order notification failed:", error.message),
-  );
+  await NotificationService.createForRoles(
+    ["superAdmin", "admin", "cs"],
+    {
+      title: "New order received",
+      message: `${order.orderId} — ${order.customerName || "Customer"} — ৳${Number(order.totalBill || 0).toFixed(2)}`,
+      type: "order_created",
+      priority: "high",
+      url: "/#page=orders&orderStatus=pending",
+      data: { orderId: order.Id, invoiceId: order.orderId },
+    },
+  ).catch((error) => console.error("Order notification failed:", error.message));
   return toPublicOrder(order);
 };
 
@@ -1301,31 +1160,26 @@ const createStaffOrderInDB = async (payload = {}) => {
   const { order, created } = await withOrderWriteLock(async (transaction) => {
     const checkoutKey = checkoutKeyFromPayload(payload);
     if (checkoutKey) {
-      const existing = await Order.findOne({
-        where: { checkoutKey },
-        transaction,
-      });
+      const existing = await Order.findOne({ where: { checkoutKey }, transaction });
       if (existing) return { order: existing, created: false };
     }
     const orderId = await generateOrderId(transaction);
-    const order = await Order.create(
-      { ...normalizedPayload, orderId, checkoutKey },
-      { transaction },
-    );
+    const order = await Order.create({ ...normalizedPayload, orderId, checkoutKey }, { transaction });
     return { order, created: true };
   });
 
   if (created) {
-    await NotificationService.createForRoles(["superAdmin", "admin", "cs"], {
-      title: "New order received",
-      message: `${order.orderId} — ${order.customerName || "Customer"} — ৳${Number(order.totalBill || 0).toFixed(2)}`,
-      type: "order_created",
-      priority: "high",
-      url: "/#page=orders&orderStatus=pending",
-      data: { orderId: order.Id, invoiceId: order.orderId },
-    }).catch((error) =>
-      console.error("Order notification failed:", error.message),
-    );
+    await NotificationService.createForRoles(
+      ["superAdmin", "admin", "cs"],
+      {
+        title: "New order received",
+        message: `${order.orderId} — ${order.customerName || "Customer"} — ৳${Number(order.totalBill || 0).toFixed(2)}`,
+        type: "order_created",
+        priority: "high",
+        url: "/#page=orders&orderStatus=pending",
+        data: { orderId: order.Id, invoiceId: order.orderId },
+      },
+    ).catch((error) => console.error("Order notification failed:", error.message));
   }
   return toPublicOrder(order);
 };
@@ -1341,11 +1195,7 @@ const saveIncompleteOrderInDB = async (payload = {}) => {
   const ipAddress = normalizeIpAddress(payload.ipAddress);
   const deviceId = normalizeDeviceId(payload.deviceId);
   const pricedPayload = await priceOrderItems(payload, { strict: false });
-  const checkedPayload = await applyOrderCoupon({
-    ...pricedPayload,
-    ipAddress,
-    deviceId,
-  });
+  const checkedPayload = await applyOrderCoupon({ ...pricedPayload, ipAddress, deviceId });
   const normalizedPayload = {
     ...normalizeCreatePayload({
       ...checkedPayload,
@@ -1357,24 +1207,16 @@ const saveIncompleteOrderInDB = async (payload = {}) => {
   };
 
   return withOrderWriteLock(async (transaction) => {
-    const existing = await getIncompleteOrderFromPayload(
-      checkedPayload,
-      transaction,
-    );
+    const existing = await getIncompleteOrderFromPayload(checkedPayload, transaction);
     if (existing) {
       if (existing.status !== "incomplete") return toPublicOrder(existing);
       await existing.update(normalizedPayload, { transaction });
       return toPublicOrder(existing);
     }
     const orderId = await generateOrderId(transaction);
-    const order = await Order.create(
-      {
-        ...normalizedPayload,
-        orderId,
-        checkoutKey: checkoutKeyFromPayload(checkedPayload),
-      },
-      { transaction },
-    );
+    const order = await Order.create({
+      ...normalizedPayload, orderId, checkoutKey: checkoutKeyFromPayload(checkedPayload),
+    }, { transaction });
     return toPublicOrder(order);
   });
 };
@@ -1389,54 +1231,7 @@ const validateOrderStatus = async (status) => {
   return key;
 };
 
-// Phone whose order history decides the Fraud Guard, or "" when the order's
-// own manual mark (or a missing phone) already decides it.
-const getFraudHistoryPhone = (plainOrder = {}) => {
-  const manualStatus = normalizeFraudStatus(plainOrder.fraudStatus);
-  if (manualStatus === "fake" || manualStatus === "safe") return "";
-  return String(plainOrder.customerPhone || "").trim();
-};
-
-const fetchFraudHistoryRows = (phones) =>
-  Order.findAll({
-    attributes: ["customerPhone", "status", "fraudStatus", "fraudReason"],
-    where: { customerPhone: { [Op.in]: phones } },
-    raw: true,
-    paranoid: true,
-  });
-
 const getFraudGuardForOrder = async (plainOrder = {}) => {
-  const phone = getFraudHistoryPhone(plainOrder);
-  const rows = phone ? await fetchFraudHistoryRows([phone]) : [];
-  return evaluateFraudGuard(plainOrder, rows);
-};
-
-// One history query for a whole page of orders instead of one per order.
-const getFraudGuardsForOrders = async (plainOrders = []) => {
-  const phones = [
-    ...new Set(plainOrders.map(getFraudHistoryPhone).filter(Boolean)),
-  ];
-  const rowsByPhone = new Map();
-  if (phones.length) {
-    for (const row of await fetchFraudHistoryRows(phones)) {
-      // MySQL's default collation compares phones case- and trailing-space-
-      // insensitively, so group the same way the single-order query matched.
-      const key = String(row.customerPhone || "")
-        .trim()
-        .toLowerCase();
-      if (!rowsByPhone.has(key)) rowsByPhone.set(key, []);
-      rowsByPhone.get(key).push(row);
-    }
-  }
-  return plainOrders.map((plainOrder) =>
-    evaluateFraudGuard(
-      plainOrder,
-      rowsByPhone.get(getFraudHistoryPhone(plainOrder).toLowerCase()) || [],
-    ),
-  );
-};
-
-const evaluateFraudGuard = (plainOrder = {}, rows = []) => {
   const manualStatus = normalizeFraudStatus(plainOrder.fraudStatus);
   if (manualStatus === "fake") {
     return {
@@ -1458,9 +1253,16 @@ const evaluateFraudGuard = (plainOrder = {}, rows = []) => {
     return { status: "safe", label: "Safe", reason: "No previous risk found" };
   }
 
-  const manuallyFake = rows.find(
-    (row) => normalizeFraudStatus(row.fraudStatus) === "fake",
-  );
+  const rows = await Order.findAll({
+    attributes: ["status", "fraudStatus", "fraudReason"],
+    where: {
+      customerPhone: phone,
+    },
+    raw: true,
+    paranoid: true,
+  });
+
+  const manuallyFake = rows.find((row) => normalizeFraudStatus(row.fraudStatus) === "fake");
   if (manuallyFake) {
     return {
       status: "fake",
@@ -1469,9 +1271,7 @@ const evaluateFraudGuard = (plainOrder = {}, rows = []) => {
     };
   }
 
-  const manuallySafe = rows.find(
-    (row) => normalizeFraudStatus(row.fraudStatus) === "safe",
-  );
+  const manuallySafe = rows.find((row) => normalizeFraudStatus(row.fraudStatus) === "safe");
   if (manuallySafe) {
     return {
       status: "safe",
@@ -1480,14 +1280,8 @@ const evaluateFraudGuard = (plainOrder = {}, rows = []) => {
     };
   }
 
-  const deliveredCount = rows.filter(
-    (row) => OrderStatusService.toOrderStatusKey(row.status) === "delivered",
-  ).length;
-  const failedCount = rows.filter((row) =>
-    FAILED_DELIVERY_STATUSES.includes(
-      OrderStatusService.toOrderStatusKey(row.status),
-    ),
-  ).length;
+  const deliveredCount = rows.filter((row) => OrderStatusService.toOrderStatusKey(row.status) === "delivered").length;
+  const failedCount = rows.filter((row) => FAILED_DELIVERY_STATUSES.includes(OrderStatusService.toOrderStatusKey(row.status))).length;
 
   if (failedCount >= 3 && deliveredCount === 0) {
     return {
@@ -1508,37 +1302,7 @@ const evaluateFraudGuard = (plainOrder = {}, rows = []) => {
   };
 };
 
-// How many earlier orders each order's phone has, from one indexed query on
-// phoneKey (last 11 digits) for the whole page.
-const getPreviousOrderCounts = async (plainOrders = []) => {
-  const keys = plainOrders.map((plain) =>
-    Order.toPhoneKey(plain.customerPhone),
-  );
-  const uniqueKeys = [...new Set(keys.filter(Boolean))];
-  if (!uniqueKeys.length) return keys.map(() => 0);
-
-  const maxId = Math.max(...plainOrders.map((plain) => Number(plain.Id) || 0));
-  const history = await Order.findAll({
-    attributes: ["Id", "phoneKey"],
-    where: { phoneKey: { [Op.in]: uniqueKeys }, Id: { [Op.lt]: maxId } },
-    raw: true,
-    paranoid: true,
-  });
-
-  return plainOrders.map((plain, index) =>
-    keys[index]
-      ? history.filter(
-          (row) => row.phoneKey === keys[index] && row.Id < Number(plain.Id),
-        ).length
-      : 0,
-  );
-};
-
-const getOrdersFromDB = async (
-  filters,
-  paginationOptions,
-  currentUser = {},
-) => {
+const getOrdersFromDB = async (filters, paginationOptions, currentUser = {}) => {
   const { page, limit, skip, sortBy, sortOrder } =
     paginationHelpers.calculatePagination(paginationOptions);
 
@@ -1550,10 +1314,7 @@ const getOrdersFromDB = async (
     where.status = OrderStatusService.toOrderStatusKey(status);
   }
 
-  if (
-    assignedEmployeeId === "unassigned" ||
-    assignedEmployeeId === "not_assigned"
-  ) {
+  if (assignedEmployeeId === "unassigned" || assignedEmployeeId === "not_assigned") {
     where.assignedEmployeeId = { [Op.is]: null };
   } else if (assignedEmployeeId && assignedEmployeeId !== "all") {
     where.assignedEmployeeId = Number(assignedEmployeeId);
@@ -1565,9 +1326,7 @@ const getOrdersFromDB = async (
       ...ORDER_SEARCHABLE_FIELDS.map((field) => ({
         [field]: { [Op.like]: `%${search}%` },
       })),
-      ...(invoiceVariants.length > 1
-        ? [{ orderId: { [Op.in]: invoiceVariants } }]
-        : []),
+      ...(invoiceVariants.length > 1 ? [{ orderId: { [Op.in]: invoiceVariants } }] : []),
     ];
   }
 
@@ -1590,22 +1349,27 @@ const getOrdersFromDB = async (
     order: [[sortBy || "Id", sortOrder || "DESC"]],
   });
 
-  const plainRows = rows.map((row) =>
-    typeof row.toJSON === "function" ? row.toJSON() : row,
+  const rowsWithRepeatInfo = await Promise.all(
+    rows.map(async (row) => {
+      const plain = typeof row.toJSON === "function" ? row.toJSON() : row;
+      const phone = normalizePhone(plain.customerPhone);
+      const previousOrderCount = phone
+        ? await Order.count({
+            where: {
+              Id: { [Op.lt]: plain.Id },
+              customerPhone: { [Op.like]: `%${phone.slice(-11) || phone}%` },
+            },
+            paranoid: true,
+          })
+        : 0;
+      return {
+        ...withAssignmentUsers(plain),
+        isRepeat: previousOrderCount > 0,
+        previousOrderCount,
+        fraudGuard: await getFraudGuardForOrder(plain),
+      };
+    }),
   );
-  const [previousOrderCounts, fraudGuards] = await Promise.all([
-    getPreviousOrderCounts(plainRows),
-    getFraudGuardsForOrders(plainRows),
-  ]);
-  const rowsWithRepeatInfo = plainRows.map((plain, index) => {
-    const previousOrderCount = previousOrderCounts[index];
-    return {
-      ...withAssignmentUsers(plain),
-      isRepeat: previousOrderCount > 0,
-      previousOrderCount,
-      fraudGuard: fraudGuards[index],
-    };
-  });
 
   return {
     meta: { page, limit, total: count },
@@ -1647,32 +1411,21 @@ const getOrderByIdFromDB = async (id, currentUser = {}) => {
   ) {
     throw new ApiError(403, "You can only view orders assigned to you");
   }
-  return {
-    ...withAssignmentUsers(plain),
-    fraudGuard: await getFraudGuardForOrder(plain),
-  };
+  return { ...withAssignmentUsers(plain), fraudGuard: await getFraudGuardForOrder(plain) };
 };
 
 const trackOrdersByPhoneFromDB = async (phone, invoiceId, options = {}) => {
   const normalized = String(phone || "").trim();
   const normalizedInvoice = String(invoiceId || "").trim();
-  if (!normalized && !normalizedInvoice)
-    throw new ApiError(400, "Phone number or invoice ID is required");
+  if (!normalized && !normalizedInvoice) throw new ApiError(400, "Phone number or invoice ID is required");
 
-  const activeTrackingStatuses = [
-    "pending",
-    "confirmed",
-    "packaging",
-    "in_courier",
-    "on_hold",
-  ];
+  const activeTrackingStatuses = ["pending", "confirmed", "packaging", "in_courier", "on_hold"];
   const baseWhere = normalizedInvoice
     ? { orderId: { [Op.in]: orderIdVariants(normalizedInvoice) } }
     : { customerPhone: { [Op.like]: `%${normalized}%` } };
-  const where =
-    normalizedInvoice || options.includeHistory
-      ? baseWhere
-      : { ...baseWhere, status: { [Op.in]: activeTrackingStatuses } };
+  const where = normalizedInvoice || options.includeHistory
+    ? baseWhere
+    : { ...baseWhere, status: { [Op.in]: activeTrackingStatuses } };
 
   let orders = await Order.findAll({
     where,
@@ -1692,15 +1445,11 @@ const trackOrdersByPhoneFromDB = async (phone, invoiceId, options = {}) => {
   return orders.map(toPublicOrder);
 };
 
-const getCustomerOrderHistoryFromDB = async (
-  phone,
-  { page = 1, limit = 5 } = {},
-) => {
+const getCustomerOrderHistoryFromDB = async (phone, { page = 1, limit = 5 } = {}) => {
   const normalized = normalizePhone(phone);
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 50);
   const safePage = Math.max(parseInt(page, 10) || 1, 1);
-  if (!normalized)
-    return { orders: [], meta: { page: safePage, limit: safeLimit, total: 0 } };
+  if (!normalized) return { orders: [], meta: { page: safePage, limit: safeLimit, total: 0 } };
 
   const { rows, count } = await Order.findAndCountAll({
     where: {
@@ -1766,18 +1515,10 @@ const sendOrderReconfirmOtpInDB = async (id, payload = {}) => {
   await order.update({ note: JSON.stringify(meta) });
 
   const smsText = `Your ${order.orderId} confirmation OTP is ${otp}. This code will expire in 5 minutes.`;
-  const smsResult = await SmsMarketingService.sendTransactionalSms(
-    order.customerPhone,
-    smsText,
-  );
+  const smsResult = await SmsMarketingService.sendTransactionalSms(order.customerPhone, smsText);
   if (!smsResult?.sent) {
-    const providerError =
-      smsResult?.errors?.[0]?.response || smsResult?.errors?.[0]?.error;
-    throw new ApiError(
-      502,
-      providerError ||
-        "OTP SMS could not be sent. Please check SMS gateway settings.",
-    );
+    const providerError = smsResult?.errors?.[0]?.response || smsResult?.errors?.[0]?.error;
+    throw new ApiError(502, providerError || "OTP SMS could not be sent. Please check SMS gateway settings.");
   }
 
   return {
@@ -1794,8 +1535,7 @@ const verifyOrderReconfirmOtpInDB = async (id, payload = {}) => {
   }
 
   const otp = String(payload.otp || "").replace(/\D/g, "");
-  if (!/^\d{6}$/.test(otp))
-    throw new ApiError(400, "Valid 6 digit OTP is required");
+  if (!/^\d{6}$/.test(otp)) throw new ApiError(400, "Valid 6 digit OTP is required");
 
   const meta = parseAnyOrderMeta(order.note);
   const otpMeta = meta.reconfirmOtp || {};
@@ -1826,22 +1566,19 @@ const verifyOrderReconfirmOtpInDB = async (id, payload = {}) => {
     note: JSON.stringify(meta),
   });
 
-  NotificationService.createForRoles(["superAdmin", "admin", "cs"], {
-    title: "Order re-confirmed",
-    message: `${order.orderId} — ${order.customerName || "Customer"} verified by OTP`,
-    type: "order_status",
-    priority: "high",
-    url: "/#page=orders&orderStatus=confirmed",
-    data: { orderId: order.Id, invoiceId: order.orderId, status: "confirmed" },
-  }).catch((error) =>
-    console.error("Order reconfirm notification failed:", error.message),
-  );
+  NotificationService.createForRoles(
+    ["superAdmin", "admin", "cs"],
+    {
+      title: "Order re-confirmed",
+      message: `${order.orderId} — ${order.customerName || "Customer"} verified by OTP`,
+      type: "order_status",
+      priority: "high",
+      url: "/#page=orders&orderStatus=confirmed",
+      data: { orderId: order.Id, invoiceId: order.orderId, status: "confirmed" },
+    },
+  ).catch((error) => console.error("Order reconfirm notification failed:", error.message));
 
-  return toPublicOrder({
-    ...order.get({ plain: true }),
-    status: "confirmed",
-    note: JSON.stringify(meta),
-  });
+  return toPublicOrder({ ...order.get({ plain: true }), status: "confirmed", note: JSON.stringify(meta) });
 };
 
 const updateOrderInDB = async (id, payload) => {
@@ -1869,34 +1606,21 @@ const updateOrderInDB = async (id, payload) => {
   const addressFieldsChanged =
     Object.prototype.hasOwnProperty.call(next, "customerArea") ||
     Object.prototype.hasOwnProperty.call(next, "customerDistrict");
-  if (
-    addressFieldsChanged &&
-    !Object.prototype.hasOwnProperty.call(next, "note")
-  ) {
+  if (addressFieldsChanged && !Object.prototype.hasOwnProperty.call(next, "note")) {
     // Website orders freeze the checkout-time address inside note.customerAddress,
     // which every read path (customer tracking, invoice, courier shipment) prefers
     // over the customerArea/customerDistrict columns — keep it in sync on edit.
     const meta = parseOrderMeta(order.note);
     if (meta.__frontendOrder) {
-      const hasArea = Object.prototype.hasOwnProperty.call(
-        next,
-        "customerArea",
-      );
-      const hasDistrict = Object.prototype.hasOwnProperty.call(
-        next,
-        "customerDistrict",
-      );
+      const hasArea = Object.prototype.hasOwnProperty.call(next, "customerArea");
+      const hasDistrict = Object.prototype.hasOwnProperty.call(next, "customerDistrict");
       // Admin's order-edit form sends the full address as a single customerArea
       // string (no separate district) — don't re-append the stale district in that case.
-      const mergedAddress =
-        hasArea && !hasDistrict
-          ? String(next.customerArea || "").trim()
-          : [
-              hasArea ? next.customerArea : order.customerArea,
-              hasDistrict ? next.customerDistrict : order.customerDistrict,
-            ]
-              .filter(Boolean)
-              .join(", ");
+      const mergedAddress = hasArea && !hasDistrict
+        ? String(next.customerArea || "").trim()
+        : [hasArea ? next.customerArea : order.customerArea, hasDistrict ? next.customerDistrict : order.customerDistrict]
+            .filter(Boolean)
+            .join(", ");
       if (mergedAddress) {
         next.note = JSON.stringify({ ...meta, customerAddress: mergedAddress });
       }
@@ -1908,10 +1632,7 @@ const updateOrderInDB = async (id, payload) => {
     const items = await resolveStaffItems(next.items);
     const totals = calculateStaffTotals(items, next);
     const meta = parseAnyOrderMeta(next.note ?? order.note);
-    const advance =
-      next.advance !== undefined
-        ? Math.max(0, Number(next.advance) || 0)
-        : Number(order.advance || 0);
+    const advance = next.advance !== undefined ? Math.max(0, Number(next.advance) || 0) : Number(order.advance || 0);
     next.note = JSON.stringify({
       ...meta,
       __frontendOrder: meta.__frontendOrder ?? true,
@@ -1956,10 +1677,7 @@ const updateOrderInDB = async (id, payload) => {
     : typeof order.toJSON === "function"
       ? order.toJSON()
       : order;
-  return {
-    ...withAssignmentUsers(plain),
-    fraudGuard: await getFraudGuardForOrder(plain),
-  };
+  return { ...withAssignmentUsers(plain), fraudGuard: await getFraudGuardForOrder(plain) };
 };
 
 const getAssignableEmployeesFromDB = async () => {
@@ -1970,25 +1688,13 @@ const getAssignableEmployeesFromDB = async () => {
         db.sequelize.where(fn("LOWER", col("status")), "active"),
       ],
     },
-    attributes: [
-      "Id",
-      "FirstName",
-      "LastName",
-      "Email",
-      "Phone",
-      "role",
-      "status",
-    ],
-    order: [
-      ["FirstName", "ASC"],
-      ["createdAt", "DESC"],
-    ],
+    attributes: ["Id", "FirstName", "LastName", "Email", "Phone", "role", "status"],
+    order: [["FirstName", "ASC"], ["createdAt", "DESC"]],
     paranoid: true,
   });
 
   return employees.map((employee) => {
-    const plain =
-      typeof employee.toJSON === "function" ? employee.toJSON() : employee;
+    const plain = typeof employee.toJSON === "function" ? employee.toJSON() : employee;
     return {
       ...plain,
       name: getUserDisplayName(plain),
@@ -1996,18 +1702,12 @@ const getAssignableEmployeesFromDB = async () => {
   });
 };
 
-const bulkAssignOrdersToEmployeeInDB = async (
-  orderIds = [],
-  employeeId,
-  actor = {},
-) => {
-  const ids = [
-    ...new Set(
-      (Array.isArray(orderIds) ? orderIds : [])
-        .map((id) => Number(id))
-        .filter(Boolean),
-    ),
-  ];
+const bulkAssignOrdersToEmployeeInDB = async (orderIds = [], employeeId, actor = {}) => {
+  const ids = [...new Set(
+    (Array.isArray(orderIds) ? orderIds : [])
+      .map((id) => Number(id))
+      .filter(Boolean),
+  )];
   if (!ids.length) throw new ApiError(400, "Order IDs are required");
 
   const employee = await User.findOne({
@@ -2018,15 +1718,7 @@ const bulkAssignOrdersToEmployeeInDB = async (
         db.sequelize.where(fn("LOWER", col("status")), "active"),
       ],
     },
-    attributes: [
-      "Id",
-      "FirstName",
-      "LastName",
-      "Email",
-      "Phone",
-      "role",
-      "status",
-    ],
+    attributes: ["Id", "FirstName", "LastName", "Email", "Phone", "role", "status"],
     paranoid: true,
   });
   if (!employee) throw new ApiError(404, "Active employee not found");
@@ -2062,9 +1754,7 @@ const bulkAssignOrdersToEmployeeInDB = async (
       Id: employeePlain.Id,
       name: employeeName,
     },
-    orders: updatedOrders.map((order) =>
-      withAssignmentUsers(order.get({ plain: true })),
-    ),
+    orders: updatedOrders.map((order) => withAssignmentUsers(order.get({ plain: true }))),
   };
 };
 
@@ -2093,25 +1783,18 @@ const sendOrderToSteadfastInDB = async (id, options = {}) => {
   }
 
   const payload = compactObject(buildSteadfastOrderPayload(order, options));
-  const response = await steadfastRequest("/create_order", {
-    method: "POST",
-    body: payload,
-  });
+  const response = await steadfastRequest("/create_order", { method: "POST", body: payload });
   const consignment = response?.consignment || response || {};
-  const steadfastStatus =
-    consignment.status || response?.delivery_status || "in_review";
-  const orderStatus =
-    mapSteadfastStatusToOrderStatus(steadfastStatus) || "in_courier";
+  const steadfastStatus = consignment.status || response?.delivery_status || "in_review";
+  const orderStatus = mapSteadfastStatusToOrderStatus(steadfastStatus) || "in_courier";
 
   await order.update({
     courier: "Steadfast",
     status: orderStatus,
     note: mergeCourierMeta(order, "steadfast", {
       invoice: payload.invoice,
-      consignmentId:
-        consignment.consignment_id || consignment.consignmentId || null,
-      trackingCode:
-        consignment.tracking_code || consignment.trackingCode || null,
+      consignmentId: consignment.consignment_id || consignment.consignmentId || null,
+      trackingCode: consignment.tracking_code || consignment.trackingCode || null,
       status: steadfastStatus,
       lastPayload: payload,
       lastResponse: consignment,
@@ -2122,8 +1805,7 @@ const sendOrderToSteadfastInDB = async (id, options = {}) => {
     orderId: order.Id,
     invoice: order.orderId,
     status: order.status,
-    consignmentId:
-      consignment.consignment_id || consignment.consignmentId || null,
+    consignmentId: consignment.consignment_id || consignment.consignmentId || null,
     trackingCode: consignment.tracking_code || consignment.trackingCode || null,
     steadfastStatus,
     response,
@@ -2149,9 +1831,7 @@ const sendOrderToPathaoInDB = async (id, options = {}) => {
 
   const config = await getPathaoConfig();
   const token = await pathaoToken(config);
-  const payload = compactObject(
-    buildPathaoOrderPayload(order, config, options),
-  );
+  const payload = compactObject(buildPathaoOrderPayload(order, config, options));
   const response = await pathaoRequest("/aladdin/api/v1/orders", {
     method: "POST",
     body: payload,
@@ -2159,13 +1839,8 @@ const sendOrderToPathaoInDB = async (id, options = {}) => {
     token,
   });
   const pathaoOrder = response?.data || response || {};
-  const pathaoStatus =
-    pathaoOrder.order_status ||
-    pathaoOrder.status ||
-    response?.message ||
-    "created";
-  const orderStatus =
-    mapPathaoStatusToOrderStatus(pathaoStatus) || "in_courier";
+  const pathaoStatus = pathaoOrder.order_status || pathaoOrder.status || response?.message || "created";
+  const orderStatus = mapPathaoStatusToOrderStatus(pathaoStatus) || "in_courier";
   const consignmentId =
     pathaoOrder.consignment_id ||
     pathaoOrder.consignmentId ||
@@ -2198,12 +1873,9 @@ const sendOrderToPathaoInDB = async (id, options = {}) => {
 };
 
 const bulkSendOrdersToSteadfastInDB = async (orderIds = [], options = {}) => {
-  const ids = [
-    ...new Set((orderIds || []).map((id) => Number(id)).filter(Boolean)),
-  ];
+  const ids = [...new Set((orderIds || []).map((id) => Number(id)).filter(Boolean))];
   if (!ids.length) throw new ApiError(400, "At least one order id is required");
-  if (ids.length > 500)
-    throw new ApiError(400, "Steadfast bulk order limit is 500");
+  if (ids.length > 500) throw new ApiError(400, "Steadfast bulk order limit is 500");
 
   const orders = await Order.findAll({
     where: { Id: { [Op.in]: ids } },
@@ -2216,11 +1888,7 @@ const bulkSendOrdersToSteadfastInDB = async (orderIds = [], options = {}) => {
   ids.forEach((id) => {
     const order = orderMap.get(id);
     if (!order) {
-      skipped.push({
-        orderId: id,
-        status: "error",
-        message: "Order not found",
-      });
+      skipped.push({ orderId: id, status: "error", message: "Order not found" });
       return;
     }
     const existing = getSteadfastMeta(order);
@@ -2244,10 +1912,7 @@ const bulkSendOrdersToSteadfastInDB = async (orderIds = [], options = {}) => {
       });
       return;
     }
-    payloadItems.push({
-      order,
-      payload: compactObject(buildSteadfastOrderPayload(order, options)),
-    });
+    payloadItems.push({ order, payload: compactObject(buildSteadfastOrderPayload(order, options)) });
   });
 
   if (!payloadItems.length) return { sent: [], skipped };
@@ -2259,53 +1924,46 @@ const bulkSendOrdersToSteadfastInDB = async (orderIds = [], options = {}) => {
   const rows = Array.isArray(response) ? response : response?.data || [];
   const sent = [];
 
-  await Promise.all(
-    payloadItems.map(async ({ order, payload }, index) => {
-      const row = rows[index] || {};
-      const successful =
-        String(row.status || "").toLowerCase() === "success" ||
-        row.tracking_code ||
-        row.consignment_id;
-      if (!successful) {
-        skipped.push({
-          orderId: order.Id,
-          invoice: order.orderId,
-          status: "error",
-          message: row.message || "Steadfast rejected this order",
-          response: row,
-        });
-        return;
-      }
-
-      await order.update({
-        courier: "Steadfast",
-        status: "in_courier",
-        note: mergeCourierMeta(order, "steadfast", {
-          invoice: payload.invoice,
-          consignmentId: row.consignment_id || null,
-          trackingCode: row.tracking_code || null,
-          status: row.delivery_status || row.status || "success",
-          lastPayload: payload,
-          lastResponse: row,
-        }),
-      });
-      sent.push({
+  await Promise.all(payloadItems.map(async ({ order, payload }, index) => {
+    const row = rows[index] || {};
+    const successful = String(row.status || "").toLowerCase() === "success" || row.tracking_code || row.consignment_id;
+    if (!successful) {
+      skipped.push({
         orderId: order.Id,
         invoice: order.orderId,
+        status: "error",
+        message: row.message || "Steadfast rejected this order",
+        response: row,
+      });
+      return;
+    }
+
+    await order.update({
+      courier: "Steadfast",
+      status: "in_courier",
+      note: mergeCourierMeta(order, "steadfast", {
+        invoice: payload.invoice,
         consignmentId: row.consignment_id || null,
         trackingCode: row.tracking_code || null,
-        status: row.status || "success",
-      });
-    }),
-  );
+        status: row.delivery_status || row.status || "success",
+        lastPayload: payload,
+        lastResponse: row,
+      }),
+    });
+    sent.push({
+      orderId: order.Id,
+      invoice: order.orderId,
+      consignmentId: row.consignment_id || null,
+      trackingCode: row.tracking_code || null,
+      status: row.status || "success",
+    });
+  }));
 
   return { sent, skipped, response };
 };
 
 const bulkSendOrdersToPathaoInDB = async (orderIds = [], options = {}) => {
-  const ids = [
-    ...new Set((orderIds || []).map((id) => Number(id)).filter(Boolean)),
-  ];
+  const ids = [...new Set((orderIds || []).map((id) => Number(id)).filter(Boolean))];
   if (!ids.length) throw new ApiError(400, "At least one order id is required");
 
   const orders = await Order.findAll({
@@ -2321,11 +1979,7 @@ const bulkSendOrdersToPathaoInDB = async (orderIds = [], options = {}) => {
   for (const id of ids) {
     const order = orderMap.get(id);
     if (!order) {
-      skipped.push({
-        orderId: id,
-        status: "error",
-        message: "Order not found",
-      });
+      skipped.push({ orderId: id, status: "error", message: "Order not found" });
       continue;
     }
 
@@ -2353,9 +2007,7 @@ const bulkSendOrdersToPathaoInDB = async (orderIds = [], options = {}) => {
     }
 
     try {
-      const payload = compactObject(
-        buildPathaoOrderPayload(order, config, options),
-      );
+      const payload = compactObject(buildPathaoOrderPayload(order, config, options));
       const response = await pathaoRequest("/aladdin/api/v1/orders", {
         method: "POST",
         body: payload,
@@ -2363,11 +2015,7 @@ const bulkSendOrdersToPathaoInDB = async (orderIds = [], options = {}) => {
         token,
       });
       const pathaoOrder = response?.data || response || {};
-      const pathaoStatus =
-        pathaoOrder.order_status ||
-        pathaoOrder.status ||
-        response?.message ||
-        "created";
+      const pathaoStatus = pathaoOrder.order_status || pathaoOrder.status || response?.message || "created";
       const consignmentId =
         pathaoOrder.consignment_id ||
         pathaoOrder.consignmentId ||
@@ -2410,14 +2058,9 @@ const bulkSendOrdersToPathaoInDB = async (orderIds = [], options = {}) => {
 // Compare the snapshot so a slow provider response cannot overwrite a newer edit.
 const saveCourierSync = async (order, values, automatic) => {
   if (!automatic) return order.update(values);
-  const [updated] = await Order.update(values, {
-    where: {
-      Id: order.Id,
-      status: order.status,
-      courier: order.courier,
-      note: order.note,
-    },
-  });
+  const [updated] = await Order.update(values, { where: {
+    Id: order.Id, status: order.status, courier: order.courier, note: order.note,
+  } });
   if (updated) Object.assign(order, values);
 };
 
@@ -2433,26 +2076,18 @@ const syncSteadfastStatusInDB = async (id, { automatic = false } = {}) => {
       : `/status_by_invoice/${encodeURIComponent(order.orderId)}`;
 
   const response = await steadfastRequest(path);
-  const steadfastStatus =
-    response?.delivery_status ||
-    response?.status_text ||
-    response?.status ||
-    "";
+  const steadfastStatus = response?.delivery_status || response?.status_text || response?.status || "";
   const orderStatus = mapSteadfastStatusToOrderStatus(steadfastStatus);
-  await saveCourierSync(
-    order,
-    {
-      ...(orderStatus ? { status: orderStatus } : {}),
-      courier: "Steadfast",
-      note: mergeCourierMeta(order, "steadfast", {
-        ...meta,
-        lookupValue,
-        status: steadfastStatus,
-        lastStatusResponse: response,
-      }),
-    },
-    automatic,
-  );
+  await saveCourierSync(order, {
+    ...(orderStatus ? { status: orderStatus } : {}),
+    courier: "Steadfast",
+    note: mergeCourierMeta(order, "steadfast", {
+      ...meta,
+      lookupValue,
+      status: steadfastStatus,
+      lastStatusResponse: response,
+    }),
+  }, automatic);
 
   return {
     orderId: order.Id,
@@ -2488,20 +2123,16 @@ const syncPathaoStatusInDB = async (id, { automatic = false } = {}) => {
     "";
   const orderStatus = mapPathaoStatusToOrderStatus(pathaoStatus);
 
-  await saveCourierSync(
-    order,
-    {
-      ...(orderStatus ? { status: orderStatus } : {}),
-      courier: "Pathao",
-      note: mergeCourierMeta(order, "pathao", {
-        ...meta,
-        lookupValue,
-        status: pathaoStatus,
-        lastStatusResponse: data,
-      }),
-    },
-    automatic,
-  );
+  await saveCourierSync(order, {
+    ...(orderStatus ? { status: orderStatus } : {}),
+    courier: "Pathao",
+    note: mergeCourierMeta(order, "pathao", {
+      ...meta,
+      lookupValue,
+      status: pathaoStatus,
+      lastStatusResponse: data,
+    }),
+  }, automatic);
 
   return {
     orderId: order.Id,
@@ -2534,16 +2165,12 @@ const createSteadfastReturnRequestInDB = async (id, reason = "") => {
   return response;
 };
 
-const getSteadfastReturnRequestsFromProvider = () =>
-  steadfastRequest("/get_return_requests");
+const getSteadfastReturnRequestsFromProvider = () => steadfastRequest("/get_return_requests");
 
 const getSteadfastPaymentsFromProvider = (paymentId) =>
-  steadfastRequest(
-    paymentId ? `/payments/${encodeURIComponent(paymentId)}` : "/payments",
-  );
+  steadfastRequest(paymentId ? `/payments/${encodeURIComponent(paymentId)}` : "/payments");
 
-const getSteadfastPoliceStationsFromProvider = () =>
-  steadfastRequest("/police_stations");
+const getSteadfastPoliceStationsFromProvider = () => steadfastRequest("/police_stations");
 
 const updateOrderStatusInDB = async (id, status, actorUserId) => {
   const nextStatus = await validateOrderStatus(status);
@@ -2556,16 +2183,12 @@ const updateOrderStatusInDB = async (id, status, actorUserId) => {
       title: "Order status updated",
       message: `${order.orderId || `Order #${order.Id}`} is now ${nextStatus}`,
       type: "order_status",
-      priority: ["cancelled", "returned", "incomplete"].includes(nextStatus)
-        ? "high"
-        : "normal",
+      priority: ["cancelled", "returned", "incomplete"].includes(nextStatus) ? "high" : "normal",
       url: `/#page=orders&orderStatus=${encodeURIComponent(nextStatus)}`,
       data: { orderId: order.Id, invoiceId: order.orderId, status: nextStatus },
       excludeUserId: actorUserId,
     },
-  ).catch((error) =>
-    console.error("Order status notification failed:", error.message),
-  );
+  ).catch((error) => console.error("Order status notification failed:", error.message));
   return order;
 };
 
@@ -2596,6 +2219,18 @@ const OrderService = {
   getSteadfastReturnRequestsFromProvider,
   getSteadfastPaymentsFromProvider,
   getSteadfastPoliceStationsFromProvider,
+  // Shared with scratch card prize delivery, which uses the same courier accounts.
+  courierClient: {
+    steadfastRequest,
+    getPathaoConfig,
+    pathaoToken,
+    pathaoRequest,
+    pathaoRequestFirst,
+    normalizeCourierPhone,
+    compactObject,
+    mapSteadfastStatusToOrderStatus,
+    mapPathaoStatusToOrderStatus,
+  },
 };
 
 module.exports = OrderService;

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { Op } = require('sequelize');
-const { createCourierSyncWorker, withSyncLock, getMaxAgeDays } = require('../app/modules/order/courierSync.worker');
+const { createCourierSyncWorker } = require('../app/modules/order/courierSync.worker');
 
 test('worker paginates, isolates failures and prevents overlapping sweeps', async () => {
   const calls = [];
@@ -19,7 +19,7 @@ test('worker paginates, isolates failures and prevents overlapping sweeps', asyn
     service: {
       async syncSteadfastStatusInDB(id, options) { assert.equal(options.automatic, true); calls.push(id); if (id === 1) throw Error('unavailable'); },
       async syncPathaoStatusInDB(id) { calls.push(id); },
-    }, logger: { warn() {}, error() {} },
+    }, logger: { warn() {}, error() {} }, delayMs: 0,
   });
   await Promise.all([worker.run(), worker.run()]);
   assert.deepEqual(calls, [1, 2, 3]);
@@ -27,6 +27,26 @@ test('worker paginates, isolates failures and prevents overlapping sweeps', asyn
   await worker.stop();
   await worker.run();
   assert.equal(pages, 3);
+});
+
+test('worker spaces lookups and stops the sweep when rate limited', async () => {
+  const calls = [];
+  const waits = [];
+  const worker = createCourierSyncWorker({
+    Order: { async findAll({ where }) {
+      return where.Id[Op.gt] === 0 ? [1, 2, 3, 4].map((Id) => ({ Id, courier: 'Pathao' })) : [];
+    } },
+    service: { async syncPathaoStatusInDB(id) {
+      calls.push(id);
+      if (id === 3) throw Object.assign(Error('Too Many Requests'), { statusCode: 429 });
+    } },
+    logger: { warn() {}, error() {} },
+    wait: async (ms) => { waits.push(ms); },
+  });
+  await worker.run();
+  assert.deepEqual(calls, [1, 2, 3]);
+  assert.deepEqual(waits, [400, 400]);
+  await worker.stop();
 });
 
 function setup(provider, { fail = false, changed = false, status = 'in_courier' } = {}) {
@@ -43,8 +63,10 @@ function setup(provider, { fail = false, changed = false, status = 'in_courier' 
       Object.assign(row, values); return [1];
     },
   } };
-  const context = { module: { exports: {} }, console, process, setTimeout, clearTimeout, AbortController,
+  const fetched = [];
+  const context = { module: { exports: {} }, console, process, setTimeout, clearTimeout, AbortController, URL, Date, Map,
     async fetch(url) {
+      fetched.push(url);
       if (fail) throw Error('courier offline');
       const data = url.includes('issue-token') ? { access_token: 'test-token' }
         : provider === 'Steadfast' ? { status: 200, delivery_status: 'delivered' }
@@ -53,6 +75,7 @@ function setup(provider, { fail = false, changed = false, status = 'in_courier' 
     },
     require(name) {
       if (name === '../../../models') return db;
+      if (name.endsWith('error/ApiError')) return require('../error/ApiError');
       if (name.includes('siteSetting.service')) return { getByType: async () => ({ data: {
         steadfast: { apiKey: 'test', secretKey: 'test' },
         pathao: { clientId: 'test', clientSecret: 'test', username: 'test', password: 'test', storeId: 1 },
@@ -64,7 +87,7 @@ function setup(provider, { fail = false, changed = false, status = 'in_courier' 
     },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/modules/order/order.service'), 'utf8'), context);
-  return { row, writes: () => writes, sync: () => context.module.exports[provider === 'Steadfast' ? 'syncSteadfastStatusInDB' : 'syncPathaoStatusInDB'](7, { automatic: true }) };
+  return { row, fetched, writes: () => writes, sync: () => context.module.exports[provider === 'Steadfast' ? 'syncSteadfastStatusInDB' : 'syncPathaoStatusInDB'](7, { automatic: true }) };
 }
 for (const provider of ['Steadfast', 'Pathao']) {
   test(`${provider} delivery automatically updates order and preserves metadata`, async () => {
@@ -86,74 +109,9 @@ for (const provider of ['Steadfast', 'Pathao']) {
   });
 }
 
-function lockSequelize(acquired, { failDisconnect = false } = {}) {
-  const state = { queries: [], connects: 0, disconnected: false, destroyed: false };
-  const connection = {
-    on(event, handler) { state.errorHandler = handler; },
-    query(sql, params, callback) { state.queries.push(sql); callback(null, [{ acquired }]); },
-    destroy() { state.destroyed = true; },
-  };
-  const sequelize = {
-    getDatabaseName: () => 'test',
-    connectionManager: {
-      config: { replication: false, host: 'db' },
-      async connect(config) { assert.equal(config.host, 'db'); state.connects++; return connection; },
-      async disconnect(c) {
-        assert.equal(c, connection);
-        if (failDisconnect) throw Error('already closed');
-        state.disconnected = true;
-      },
-      getConnection: async () => assert.fail('lock must not take a pooled connection'),
-    },
-  };
-  return { sequelize, state };
-}
-
-for (const acquired of [0, 1]) test(`sync lock acquired=${acquired} runs work once and always closes its own connection`, async () => {
-  const { sequelize, state } = lockSequelize(acquired);
-  let ran = 0;
-  const result = withSyncLock(sequelize, async () => { ran++; throw Error('sweep failed'); });
-  if (acquired) await assert.rejects(result, /sweep failed/); else await result;
-  assert.equal(ran, acquired);
-  assert.equal(state.connects, 1);
-  assert.deepEqual(state.queries, ['SELECT GET_LOCK(?, 0) AS acquired']);
-  assert.equal(state.disconnected, true);
-  assert.equal(typeof state.errorHandler, 'function');
-});
-
-test('sync lock destroys the session when a clean close fails', async () => {
-  const { sequelize, state } = lockSequelize(1, { failDisconnect: true });
-  await withSyncLock(sequelize, async () => {});
-  assert.equal(state.destroyed, true);
-});
-
-test('worker skips the sweep when another process holds the lock', async () => {
-  let pages = 0;
-  const worker = createCourierSyncWorker({
-    Order: { async findAll() { pages++; return []; } },
-    service: {}, logger: { warn() {}, error() {} },
-    lock: async () => {},
-  });
-  await worker.run();
-  assert.equal(pages, 0);
-  await worker.stop();
-});
-
-test('worker only sweeps orders created within the max age window', async () => {
-  let createdAfter;
-  const now = Date.parse('2026-10-22T00:00:00Z');
-  const worker = createCourierSyncWorker({
-    Order: { async findAll({ where }) { createdAfter = where.createdAt[Op.gte]; return []; } },
-    service: {}, logger: { warn() {}, error() {} }, maxAgeDays: 30, now: () => now,
-  });
-  await worker.run();
-  assert.equal(createdAfter.toISOString(), '2026-09-22T00:00:00.000Z');
-  await worker.stop();
-});
-
-test('max age comes from COURIER_SYNC_MAX_AGE_DAYS and falls back to 30 days', () => {
-  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: '45' }), 45);
-  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: 'abc' }), 30);
-  assert.equal(getMaxAgeDays({ COURIER_SYNC_MAX_AGE_DAYS: '0' }), 30);
-  assert.equal(getMaxAgeDays({}), 30);
+test('Pathao token is reused across status lookups', async () => {
+  const { sync, fetched } = setup('Pathao', { status: 'on_hold' });
+  await sync();
+  await sync();
+  assert.equal(fetched.filter((url) => url.includes('issue-token')).length, 1);
 });

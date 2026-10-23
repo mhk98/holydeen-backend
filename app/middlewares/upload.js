@@ -2,12 +2,13 @@ const multer = require("multer");
 const path = require("path");
 const { randomUUID } = require("crypto");
 const {
-  isCloudinaryEnabled,
-  uploadToCloudinary,
-} = require("../../helpers/cloudinary");
+  isStorageEnabled,
+  uploadFile: uploadToStorage,
+  STORAGE_NOT_CONFIGURED_MESSAGE,
+} = require("../../helpers/storage");
 const ApiError = require("../../error/ApiError");
 
-// Every upload goes to Cloudinary; there is no local disk fallback, so a
+// Every upload goes to DigitalOcean Spaces; there is no local disk fallback, so a
 // missing configuration fails the request instead of silently writing files
 // that disappear on the next deploy.
 
@@ -50,7 +51,7 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Profile photos: images only (no PDF), checked before anything reaches Cloudinary.
+// Profile photos: images only (no PDF), checked before anything reaches storage.
 const imageOnlyFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   if (
@@ -78,19 +79,19 @@ const collectFiles = (req) => {
   return [];
 };
 
-// Uploads the in-memory files to Cloudinary, then sets `filename` and `path`
-// to the secure URL, so controllers that store either keep working unchanged.
-const pushToCloudinary = async (req) => {
+// Uploads the in-memory files to Spaces, then sets `filename` and `path`
+// to the public URL, so controllers that store either keep working unchanged.
+const pushToStorage = async (req) => {
   const files = collectFiles(req);
   await Promise.all(
     files.map(async (file) => {
-      const result = await uploadToCloudinary(
+      const result = await uploadToStorage(
         file.buffer,
         generateFileName(file),
       );
-      file.filename = result.secure_url;
-      file.path = result.secure_url;
-      file.cloudinaryPublicId = result.public_id;
+      file.filename = result.url;
+      file.path = result.url;
+      file.storageKey = result.key;
       file.buffer = undefined;
     }),
   );
@@ -106,15 +107,10 @@ const withStorage = (multerMiddleware) => (req, res, next) => {
       );
     }
     if (!collectFiles(req).length) return next();
-    if (!isCloudinaryEnabled) {
-      return next(
-        new ApiError(
-          500,
-          "File storage is not configured (Cloudinary credentials missing)",
-        ),
-      );
+    if (!isStorageEnabled) {
+      return next(new ApiError(500, STORAGE_NOT_CONFIGURED_MESSAGE));
     }
-    pushToCloudinary(req).then(() => next(), next);
+    pushToStorage(req).then(() => next(), next);
   });
 };
 

@@ -10,6 +10,9 @@ const categoryType = (name = "") => {
   if (value.includes("main slider") || value === "slider") return "slider";
   if (value.includes("slider right") || value.includes("side banner") || value === "side") return "side";
   if (value.includes("popup")) return "popup";
+  if (value.includes("scratch card") || value.includes("scratch-card")) {
+    return value.includes("mobile") ? "scratch_card_mobile" : "scratch_card";
+  }
   return "custom";
 };
 
