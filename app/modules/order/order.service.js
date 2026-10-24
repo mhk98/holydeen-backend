@@ -1087,6 +1087,12 @@ const createOrderInDB = async (payload, options = {}) => {
     const replay = await getIncompleteOrderFromPayload(payload);
     if (replay && replay.status !== "incomplete") return toPublicOrder(replay);
   }
+  // Only incomplete drafts may be phone-only; a website checkout needs name, phone and address.
+  if (options.requireCustomerInfo && (!String(payload.customerName || "").trim()
+    || !String(payload.customerPhone || "").trim()
+    || !String(payload.customerAddress || "").trim())) {
+    throw new ApiError(400, "Customer name, phone and address are required");
+  }
   const ipAddress = normalizeIpAddress(payload.ipAddress);
   const deviceId = normalizeDeviceId(payload.deviceId);
   if ((ipAddress || deviceId) && IpBlock) {

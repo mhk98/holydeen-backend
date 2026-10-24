@@ -24,7 +24,7 @@ const createOrder = catchAsync(async (req, res) => {
   const result = await OrderService.createOrderInDB({
     ...req.body,
     ipAddress: getClientIp(req),
-  });
+  }, { requireCustomerInfo: true });
   if (req.body.landingTracking?.enabled === true) {
     const eventId = `Purchase.order.${result.Id || result.orderId}`;
     result.purchaseEventId = eventId;
