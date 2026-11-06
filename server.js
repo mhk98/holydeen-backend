@@ -96,8 +96,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5173",
-  "https://admin.holygift.online",
-  "https://holygift.xyz",
+  "https://admin.holydeen.com",
+  "https://holydeen.com",
 ];
 
 const ALLOWED_ORIGINS = new Set(
@@ -132,6 +132,23 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
+
+/* ========================
+   DATABASE READINESS
+======================== */
+
+// The port opens before the schema sync finishes (it can take over a minute on
+// a remote database), so API calls get a clear 503 instead of a refused connection.
+let databaseReady = false;
+app.use("/api", (req, res, next) => {
+  if (databaseReady) return next();
+  res.set("Retry-After", "5");
+  return res.status(503).json({
+    status: "error",
+    code: "SERVER_STARTING",
+    message: "Server is starting. Please try again shortly.",
+  });
+});
 
 /* ========================
    RATE LIMITING
@@ -368,33 +385,46 @@ app.use((err, req, res, next) => {
    SERVER START FUNCTION
 ======================== */
 
-const startServer = async () => {
-  try {
-    // Authenticate DB connection
-    await db.sequelize.authenticate();
-    await db.ready;
-    console.log("✅ Database connected successfully");
+// Exiting on a database error leaves the API down (nodemon waits for a file
+// change) or makes the host restart it, spending more MySQL connection attempts
+// (ER_USER_LIMIT_REACHED). Stay up and retry with backoff.
+const DB_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000];
 
-    // Sync models (optional in production)
-    // await db.sequelize.sync();
-
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      // Every backend sharing the live DB polls the same courier accounts, so
-      // local copies can opt out with COURIER_SYNC_ENABLED=false.
-      if (process.env.COURIER_SYNC_ENABLED !== "false") {
-        courierSyncWorker.start();
-        scratchCardCourierSyncWorker.start();
-      }
-    });
-  } catch (error) {
-    console.error("❌ Failed to connect to database:", error.message);
-    if (error.original?.code === "ER_USER_LIMIT_REACHED") {
+const connectDatabase = async () => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await db.initialize();
+      return;
+    } catch (error) {
+      const delay =
+        DB_RETRY_DELAYS_MS[Math.min(attempt, DB_RETRY_DELAYS_MS.length - 1)];
       console.error(
-        "⚠️  DB connection limit exceeded. ১ ঘণ্টা পর আবার চেষ্টা করুন অথবা hosting panel থেকে connection reset করুন।",
+        `❌ Failed to connect to database: ${error.message}. Retrying in ${delay / 1000}s`,
       );
+      if (error.original?.code === "ER_USER_LIMIT_REACHED") {
+        console.error(
+          "⚠️  DB connection limit exceeded. ১ ঘণ্টা পর আবার চেষ্টা করুন অথবা hosting panel থেকে connection reset করুন।",
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    process.exit(1);
+  }
+};
+
+const startServer = async () => {
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
+
+  await connectDatabase();
+  databaseReady = true;
+  console.log("✅ Database connected successfully");
+
+  // Every backend sharing the live DB polls the same courier accounts, so
+  // local copies can opt out with COURIER_SYNC_ENABLED=false.
+  if (process.env.COURIER_SYNC_ENABLED !== "false") {
+    courierSyncWorker.start();
+    scratchCardCourierSyncWorker.start();
   }
 };
 

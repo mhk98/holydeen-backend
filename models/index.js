@@ -508,6 +508,9 @@ const ensureCategoryFrontendColumns = async () => {
     type: DataTypes.TEXT("long"),
     allowNull: true,
   });
+  await maybeAdd("bannerTitle", { type: DataTypes.STRING, allowNull: true });
+  await maybeAdd("addonProductId", { type: DataTypes.INTEGER(10), allowNull: true });
+  await maybeAdd("addonPrice", { type: DataTypes.DECIMAL(10, 2), allowNull: true });
   await maybeAdd("sortOrder", { type: DataTypes.INTEGER(10), allowNull: true });
   await maybeAdd("isActive", {
     type: DataTypes.BOOLEAN,
@@ -1039,7 +1042,7 @@ const ensureOrderAssignmentColumns = async () => {
 // Sync
 // =====================
 
-db.ready = db.sequelize
+const syncSchema = () => db.sequelize
   .sync({ force: false })
   .then(async () => {
     await ensureUserRoleColumn();
@@ -1088,5 +1091,16 @@ db.ready = db.sequelize
     console.error("Error on re-sync:", err);
     throw err;
   });
+
+// Shared by boot and tools; a failed run is cleared so the caller can retry.
+let schemaSync = null;
+db.initialize = () => {
+  schemaSync ||= syncSchema().catch((err) => {
+    schemaSync = null;
+    throw err;
+  });
+  return schemaSync;
+};
+db.ready = db.initialize();
 
 module.exports = db;

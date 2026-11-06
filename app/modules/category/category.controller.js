@@ -3,6 +3,7 @@ const sendResponse = require("../../../shared/sendResponse");
 const pick = require("../../../shared/pick");
 const { CategoryFilterAbleFileds } = require("./category.constants");
 const CategoryService = require("./category.service");
+const { getAddonOffers: findAddonOffers } = require("../order/orderPricing");
 
 const insertIntoDB = catchAsync(async (req, res) => {
   const result = await CategoryService.insertIntoDB(req.body);
@@ -80,6 +81,17 @@ const getPublicMenu = catchAsync(async (req, res) => {
   });
 });
 
+const getAddonOffers = catchAsync(async (req, res) => {
+  const productIds = String(req.query.productIds || "").split(",");
+  const result = await findAddonOffers(productIds);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Add-on offers fetched!!",
+    data: result,
+  });
+});
+
 const CategoryController = {
   getAllFromDB,
   insertIntoDB,
@@ -88,6 +100,7 @@ const CategoryController = {
   deleteIdFromDB,
   getAllFromDBWithoutQuery,
   getPublicMenu,
+  getAddonOffers,
 };
 
 module.exports = CategoryController;

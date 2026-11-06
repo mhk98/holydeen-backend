@@ -998,9 +998,11 @@ const applyOrderCoupon = async (payload = {}) => {
   let couponCode = null;
 
   if (payload.couponCode) {
+    // Add-ons already sell at an offer price, so coupons only apply to the rest.
+    const addonSubtotal = calculateItemsSubtotal(payload.items.filter((item) => item.isAddon));
     const appliedCoupon = await CouponCodeService.validateCoupon({
       code: payload.couponCode,
-      subtotal,
+      subtotal: subtotal - addonSubtotal,
     });
     discount = Number(appliedCoupon.discount || 0);
     couponCode = appliedCoupon.code;

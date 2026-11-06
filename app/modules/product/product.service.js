@@ -653,13 +653,25 @@ const toStorefrontProduct = (product, maps = {}) => {
   };
 };
 
+// Add-on products are only sold through their category's offer at checkout.
+const getAddonProductIds = async () => {
+  const categories = await db.category.findAll({
+    attributes: ["addonProductId"],
+    where: { addonProductId: { [Op.ne]: null } },
+    raw: true,
+  });
+  return categories.map((category) => Number(category.addonProductId));
+};
+
 const getStorefrontProducts = async (options = {}) => {
   const page = Math.max(Number(options.page) || 1, 1);
   const limit = Math.min(Math.max(Number(options.limit) || 200, 1), 500);
   const skip = (page - 1) * limit;
   const searchTerm = String(options.searchTerm || "").trim();
 
+  const addonProductIds = await getAddonProductIds();
   const andConditions = [{ status: { [Op.ne]: "Inactive" } }];
+  if (addonProductIds.length) andConditions.push({ Id: { [Op.notIn]: addonProductIds } });
   if (searchTerm) {
     andConditions.push({
       [Op.or]: ProductSearchableFields.map((field) => ({
@@ -701,6 +713,8 @@ const getStorefrontProducts = async (options = {}) => {
 };
 
 const getStorefrontProductById = async (id) => {
+  if ((await getAddonProductIds()).includes(Number(id))) return null;
+
   const product = await Product.findOne({
     where: { Id: id, status: { [Op.ne]: "Inactive" } },
     include: [{ model: Variation, as: "variations" }],

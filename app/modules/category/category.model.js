@@ -35,6 +35,18 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.TEXT("long"),
         allowNull: true,
       },
+      bannerTitle: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      addonProductId: {
+        type: DataTypes.INTEGER(10),
+        allowNull: true,
+      },
+      addonPrice: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+      },
       sortOrder: {
         type: DataTypes.INTEGER(10),
         allowNull: true,

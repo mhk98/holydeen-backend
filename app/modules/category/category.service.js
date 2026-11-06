@@ -119,10 +119,30 @@ const getAllFromDBWithoutQuery = async () => {
   return result;
 };
 
+// Rows not yet migrated may still hold multi-MB base64 strings; never ship
+// those in the public menu.
+const publicImage = (...files) =>
+  files.find((file) => file && !isInlineImage(file)) || null;
+
+// Categories with a sort order come first; the rest keep their creation order.
+const sortRank = (category) => category.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
 const getPublicMenu = async () => {
   const [categories, subcategories, childcategories] = await Promise.all([
     Category.findAll({
-      attributes: ["Id", "name", "sortOrder", "isActive", "frontView", "imageFile", "image"],
+      attributes: [
+        "Id",
+        "name",
+        "sortOrder",
+        "isActive",
+        "frontView",
+        "imageFile",
+        "image",
+        "bannerImage",
+        "bannerTitle",
+        "metaTitle",
+        "metaDescription",
+      ],
       where: {
         status: { [Op.ne]: "Inactive" },
       },
@@ -179,15 +199,22 @@ const getPublicMenu = async () => {
     return acc;
   }, {});
 
-  return categories.map((category, index) => ({
+  const sortedCategories = [...categories].sort(
+    (a, b) => sortRank(a) - sortRank(b),
+  );
+
+  return sortedCategories.map((category, index) => ({
     Id: category.Id,
     label: category.name,
     subItems: subcategoriesByCategory[String(category.Id)] || [],
     sortOrder: category.sortOrder ?? index,
-    isActive: category.isActive !== false && category.frontView !== false,
-    // Rows not yet migrated may still hold multi-MB base64 strings; never
-    // ship those in the public menu.
-    imageFile: [category.imageFile, category.image].find((file) => file && !isInlineImage(file)) || null,
+    // raw queries return MySQL booleans as 0/1, so test truthiness.
+    isActive: Boolean(category.isActive) && Boolean(category.frontView),
+    imageFile: publicImage(category.imageFile, category.image),
+    bannerImage: publicImage(category.bannerImage),
+    bannerTitle: category.bannerTitle || null,
+    metaTitle: category.metaTitle || null,
+    metaDescription: category.metaDescription || null,
   }));
 };
 

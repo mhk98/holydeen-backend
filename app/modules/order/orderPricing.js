@@ -88,11 +88,12 @@ const getWebsiteDeliveryCharge = async (district) => {
   return minimum;
 };
 
-const loadProducts = async (ids) => {
+const loadProducts = async (ids, attributes) => {
   const cleanIds = [...new Set(ids.map(Number).filter((id) => id > 0))];
   if (!cleanIds.length) return new Map();
   const products = await db.product.findAll({
     where: { Id: { [Op.in]: cleanIds } },
+    ...(attributes ? { attributes } : {}),
     include: [{ model: db.variation, as: "variations" }],
   });
   return new Map(products.map((product) => [Number(product.Id), product]));
@@ -166,11 +167,142 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
   return { ...payload, items, deliveryCharge };
 };
 
-const priceWebsiteOrder = async (payload, strict) => {
-  const products = await loadProducts(payload.items.map((item) => item.id));
-  let allFreeShipping = payload.items.length > 0;
+// Categories configured in admin to offer an add-on product at a special price.
+const loadAddonRules = async () => {
+  if (!db.category) return [];
+  const categories = await db.category.findAll({
+    attributes: ["Id", "name", "status", "addonProductId", "addonPrice"],
+    where: { addonProductId: { [Op.ne]: null } },
+    raw: true,
+  });
+  return categories.map((category) => ({
+    categoryId: Number(category.Id),
+    productId: Number(category.addonProductId),
+    price: category.addonPrice === null || category.addonPrice === undefined
+      ? null
+      : Number(category.addonPrice),
+    active: category.status !== "Inactive",
+  }));
+};
 
-  const items = payload.items.map((item) => {
+const isLiveRule = (rule) => rule.active && rule.price !== null;
+
+// Checkout waits on this lookup, so it skips the large product columns it doesn't need.
+const OFFER_PRODUCT_FIELDS = ["Id", "name", "file", "images", "status", "categoryId"];
+
+// Products keep their pictures in `images` (a JSON column that can arrive as a string);
+// `file` is only set on older rows. Inline base64 is too large to send to checkout.
+const offerImage = (product) => {
+  let images = product.images;
+  if (typeof images === "string") {
+    try {
+      images = JSON.parse(images);
+    } catch {
+      images = [];
+    }
+  }
+  const candidates = [product.file, ...(Array.isArray(images) ? images : [])];
+  return candidates.find((image) => image && !String(image).startsWith("data:")) || null;
+};
+
+/**
+ * Add-on offers the given cart products qualify for. The storefront works out how many
+ * add-ons to show (one per qualifying item); priceAddonItems enforces the same limit.
+ */
+const getAddonOffers = async (productIds = []) => {
+  const ids = [...new Set(productIds.map(Number).filter((id) => id > 0))].slice(0, 100);
+  const rules = (await loadAddonRules()).filter(isLiveRule);
+  if (!ids.length || !rules.length) return [];
+
+  const products = await loadProducts([...ids, ...rules.map((rule) => rule.productId)], OFFER_PRODUCT_FIELDS);
+  const cartProducts = ids
+    .map((id) => products.get(id))
+    .filter((product) => product && product.status !== "Inactive");
+
+  return rules.flatMap((rule) => {
+    const product = products.get(rule.productId);
+    if (!product || product.status === "Inactive") return [];
+    const qualifyingProductIds = cartProducts
+      .filter((item) => Number(item.categoryId) === rule.categoryId && Number(item.Id) !== rule.productId)
+      .map((item) => Number(item.Id));
+    if (!qualifyingProductIds.length) return [];
+
+    const variants = (product.variations || [])
+      .filter((variation) => isVariationAvailable(variation, 1))
+      .map((variation) => {
+        const { options, variant } = describeVariation(variation);
+        return { id: variation.Id, options, label: variant || "", stock: Number(variation.stock || 0) };
+      });
+    if (!variants.length) return [];
+
+    return [{
+      categoryId: rule.categoryId,
+      price: rule.price,
+      qualifyingProductIds,
+      product: { id: product.Id, name: product.name, file: offerImage(product), variants },
+    }];
+  });
+};
+
+// Validates requested add-on lines against what the cart qualifies for. Prices always come
+// from the category. Incomplete drafts (strict=false) silently drop anything invalid.
+const priceAddonItems = (requests, { rules, products, mainItems, strict }) => {
+  const used = new Map();
+  const reject = (message) => {
+    if (strict) throw new ApiError(400, message);
+    return [];
+  };
+
+  return requests.flatMap((item) => {
+    const rule = rules.find((candidate) =>
+      isLiveRule(candidate) &&
+      candidate.categoryId === Number(item.addonCategoryId) &&
+      candidate.productId === Number(item.id));
+    const product = products.get(Number(item.id));
+    if (!rule || !product || product.status === "Inactive") return reject("এই অফারটি আর পাওয়া যাচ্ছে না");
+
+    const entitled = mainItems.reduce((sum, main) => {
+      const mainProduct = products.get(Number(main.id));
+      return Number(mainProduct?.categoryId) === rule.categoryId && Number(main.id) !== rule.productId
+        ? sum + toQty(main.qty)
+        : sum;
+    }, 0);
+    const qty = toQty(item.qty);
+    const total = (used.get(rule.categoryId) || 0) + qty;
+    if (total > entitled) return reject("এই অফারের পরিমাণ cart-এর পণ্যের চেয়ে বেশি হতে পারবে না");
+
+    const variation = findVariation(product, item);
+    if (!variation) return reject(`অফারের "${product.name}" এর size বাছাই করুন`);
+    if (strict && !isVariationAvailable(variation, qty)) {
+      return reject(`অফারের "${product.name}" এর পর্যাপ্ত stock নেই`);
+    }
+
+    used.set(rule.categoryId, total);
+    return [{
+      ...item,
+      id: product.Id,
+      variantId: variation.Id,
+      name: product.name,
+      ...describeVariation(variation),
+      price: rule.price,
+      qty,
+      freeShipping: false,
+      isAddon: true,
+      addonCategoryId: rule.categoryId,
+    }];
+  });
+};
+
+const priceWebsiteOrder = async (payload, strict) => {
+  const mainItems = payload.items.filter((item) => !item.isAddon);
+  const addonRequests = payload.items.filter((item) => item.isAddon);
+  const rules = await loadAddonRules();
+  const addonProductIds = new Set(rules.map((rule) => rule.productId));
+  const products = await loadProducts(payload.items.map((item) => item.id));
+  // Add-ons never affect delivery: a free-shipping cart stays free with one added.
+  let allFreeShipping = mainItems.length > 0;
+
+  const pricedMainItems = mainItems.map((item) => {
     const qty = toQty(item.qty);
     const product = products.get(Number(item.id));
     const fail = (message) => {
@@ -180,6 +312,9 @@ const priceWebsiteOrder = async (payload, strict) => {
     };
     if (!product || product.status === "Inactive") {
       return fail(`"${item.name || "Product"}" পণ্যটি আর পাওয়া যাচ্ছে না`);
+    }
+    if (addonProductIds.has(Number(product.Id))) {
+      return fail(`"${product.name}" শুধু অফারের সাথে পাওয়া যায়`);
     }
 
     const variation = findVariation(product, item);
@@ -204,6 +339,11 @@ const priceWebsiteOrder = async (payload, strict) => {
       freeShipping,
     };
   });
+
+  const items = [
+    ...pricedMainItems,
+    ...priceAddonItems(addonRequests, { rules, products, mainItems, strict }),
+  ];
 
   // The storefront only charges delivery once a district is picked; a final order without
   // one (outdated client) is charged the outside-Dhaka rate rather than nothing.
@@ -291,4 +431,5 @@ module.exports = {
   calculateStaffTotals,
   getLandingOptions,
   getWebsiteDeliveryCharge,
+  getAddonOffers,
 };

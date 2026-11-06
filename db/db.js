@@ -39,7 +39,8 @@ const sequelize = new Sequelize(
   },
 );
 
-// Test the connection
+// Test the connection. Don't exit on failure: server.js keeps the API up and
+// retries with backoff.
 sequelize
   .authenticate()
   .then(() => {
@@ -51,7 +52,6 @@ sequelize
     console.error("DB_NAME:", process.env.DB_NAME || "NOT SET");
     console.error("DB_USER:", process.env.DB_USER || "NOT SET");
     console.error("DB_PORT:", process.env.DB_PORT || "NOT SET");
-    process.exit(1);
   });
 
 const db = {};
