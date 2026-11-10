@@ -4,6 +4,7 @@ const ApiError = require("../../../error/ApiError");
 const {
   getVariationOptions,
   variationSalePrice,
+  variationRegularPrice,
   isVariationAvailable,
   variantLabel,
 } = require("../../../shared/productVariants");
@@ -130,7 +131,11 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
   const options = getLandingOptions(page);
   const mainRequests = payload.items.filter((item) => !item.isAddon);
   const addonRequests = payload.items.filter((item) => item.isAddon);
-  const rules = addonRequests.length ? await loadAddonRules() : [];
+  const regularData = parseObject(page.regularData);
+  // Admin can switch the add-on offer off per landing page (Order Form → Add-on অফার);
+  // then no rule applies and any add-on line is rejected (or dropped from a draft).
+  const addonEnabled = parseObject(regularData.orderForm).addonEnabled !== false;
+  const rules = addonRequests.length && addonEnabled ? await loadAddonRules() : [];
   const products = await loadProducts([
     ...options.map((option) => option.linkedProductId).filter(Boolean),
     ...rules.map((rule) => rule.productId),
@@ -170,7 +175,6 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
     ...priceAddonItems(addonRequests, { rules, products, mainItems: linkedItems, strict }),
   ];
 
-  const regularData = parseObject(page.regularData);
   const outside = String(payload.customerDistrict || "").trim().toLowerCase() === "outside";
   let deliveryCharge = 0;
   if (!allFreeShipping) {
@@ -246,7 +250,14 @@ const getAddonOffers = async (productIds = []) => {
       .filter((variation) => isVariationAvailable(variation, 1))
       .map((variation) => {
         const { options, variant } = describeVariation(variation);
-        return { id: variation.Id, options, label: variant || "", stock: Number(variation.stock || 0) };
+        return {
+          id: variation.Id,
+          options,
+          label: variant || "",
+          stock: Number(variation.stock || 0),
+          // What the product normally sells for, so the storefront can show the saving.
+          regularPrice: Math.max(variationSalePrice(variation), variationRegularPrice(variation)),
+        };
       });
     if (!variants.length) return [];
 

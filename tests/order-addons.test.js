@@ -12,6 +12,7 @@ const products = [
 // Landing 50 sells product 1 (offer category); landing 51 sells product 2 (no offer).
 const landingPages = [
   { Id: 50, productId: 1, regularData: JSON.stringify({ productOptions: [{ productId: 1, name: '2 Attar Combo', price: 999 }] }) },
+  { Id: 52, productId: 1, regularData: JSON.stringify({ productOptions: [{ productId: 1, name: '2 Attar Combo', price: 999 }], orderForm: { addonEnabled: false } }) },
   { Id: 51, productId: 2, regularData: JSON.stringify({ productOptions: [{ productId: 2, name: 'Other Combo', price: 700 }] }) },
 ];
 const category = { Id: 8, name: 'Offer', status: 'Active', addonProductId: 7, addonPrice: '99.00' };
@@ -36,6 +37,7 @@ test('offer lists only in-stock sizes for qualifying products', async () => {
   assert.equal(offer.price, 99);
   assert.deepEqual(offer.qualifyingProductIds, [1]);
   assert.deepEqual(offer.product.variants.map((v) => v.id), [26, 27]);
+  assert.equal(offer.product.variants[0].regularPrice, 500);
   assert.deepEqual(await getAddonOffers(['2']), []);
 });
 
@@ -97,4 +99,10 @@ test('landing order: add-ons limited by quantity and by the linked product categ
 test('landing order: add-on keeps free delivery of a free-shipping landing product', async () => {
   const { deliveryCharge } = await landing(50, [combo(), hoodie(27)]);
   assert.equal(deliveryCharge, 0);
+});
+
+test('landing order: add-on refused when the page switched the offer off', async () => {
+  await assert.rejects(landing(52, [combo(), hoodie(27)]), /অফার/);
+  const { items } = await landing(52, [combo(), hoodie(27)], { strict: false });
+  assert.deepEqual(items.map((item) => item.id), [1]);
 });

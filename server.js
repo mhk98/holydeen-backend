@@ -172,7 +172,7 @@ const limiterDefaults = {
 // Strict limiter for auth endpoints
 const authLimiter = rateLimit({
   ...limiterDefaults,
-  windowMs: 5 * 60 * 1000, // 5 minutes
+  windowMs: 1 * 60 * 1000, // 1 minutes
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
