@@ -7,6 +7,8 @@ module.exports = (sequelize, DataTypes) => {
       productId: { type: DataTypes.INTEGER(10), allowNull: true },
       product: { type: DataTypes.STRING, allowNull: true },
       title: { type: DataTypes.STRING, allowNull: false },
+      // Public URL path (holydeen.com/<slug>), made from the campaign title.
+      slug: { type: DataTypes.STRING(191), allowNull: true },
       subTitle: { type: DataTypes.STRING, allowNull: true },
       bannerImageUrl: { type: DataTypes.TEXT("long"), allowNull: true },
       prizeImageUrl: { type: DataTypes.TEXT("long"), allowNull: true },

@@ -1,6 +1,7 @@
 const db = require("../db/db");
 const { DataTypes, Op } = require("sequelize");
 const { generateReferenceCode } = require("../app/modules/scratchCard/scratchCard.reference");
+const { uniqueLandingSlug } = require("../app/modules/landingPage/landingPage.slug");
 
 // =====================
 // Define models
@@ -892,6 +893,19 @@ const ensureLandingPageContentColumns = async () => {
     defaultValue: true,
   });
   await maybeAdd("deletedAt", { type: DataTypes.DATE, allowNull: true });
+  await maybeAdd("slug", { type: DataTypes.STRING(191), allowNull: true });
+
+  // Pages made before slugs existed get one from their campaign title.
+  const unslugged = await db.landingPage.findAll({
+    attributes: ["Id", "title"],
+    where: { slug: null },
+    paranoid: false,
+    order: [["Id", "ASC"]],
+  });
+  for (const page of unslugged) {
+    const slug = await uniqueLandingSlug(db.landingPage, page.title, page.Id);
+    await page.update({ slug }, { silent: true });
+  }
 
   await maybeChange("bannerImageUrl", {
     type: DataTypes.TEXT("long"),

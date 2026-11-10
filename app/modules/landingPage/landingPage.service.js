@@ -3,6 +3,7 @@ const paginationHelpers = require("../../../helpers/paginationHelper");
 const db = require("../../../models");
 const ApiError = require("../../../error/ApiError");
 const { getLandingOptions } = require("../order/orderPricing");
+const { uniqueLandingSlug } = require("./landingPage.slug");
 
 const LandingPage = () => db.landingPage;
 const Product = () => db.product;
@@ -199,7 +200,10 @@ const normalizePayload = async (payload = {}) => {
   };
 };
 
-const insertIntoDB = async (payload) => LandingPage().create(await normalizePayload(payload));
+const insertIntoDB = async (payload) => {
+  const data = await normalizePayload(payload);
+  return LandingPage().create({ ...data, slug: await uniqueLandingSlug(LandingPage(), data.title) });
+};
 
 const getAllFromDB = async (filters, options) => {
   const { page, limit, skip } = paginationHelpers.calculatePagination(options);
@@ -228,11 +232,12 @@ const getOneFromDB = async (id) => {
   return row;
 };
 
-const getPublicOneFromDB = async (id) => {
-  const row = await LandingPage().findOne({
-    where: { Id: id, status: true },
-    paranoid: true,
-  });
+// Pages are opened by slug (holydeen.com/<slug>); a numeric id still works for old links.
+const getPublicOneFromDB = async (slugOrId) => {
+  const key = String(slugOrId || "").normalize("NFC").toLowerCase();
+  const find = (where) => LandingPage().findOne({ where: { ...where, status: true }, paranoid: true });
+  const row = (key && await find({ slug: key })) ||
+    (/^\d+$/.test(key) ? await find({ Id: Number(key) }) : null);
   if (!row) throw new ApiError(404, "Landing page not found or inactive");
 
   // Lets the storefront show free delivery for offers linked to free-shipping products.
@@ -253,7 +258,12 @@ const updateOneFromDB = async (id, payload) => {
   const row = await LandingPage().findOne({ where: { Id: id } });
   if (!row) throw new ApiError(404, "Landing page not found");
   const existing = row.get({ plain: true });
-  await row.update(await normalizePayload({ ...existing, ...payload }));
+  const data = await normalizePayload({ ...existing, ...payload });
+  // The URL follows the campaign title; it only changes when the title does.
+  if (!existing.slug || data.title !== existing.title) {
+    data.slug = await uniqueLandingSlug(LandingPage(), data.title, row.Id);
+  }
+  await row.update(data);
   return row;
 };
 
