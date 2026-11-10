@@ -9,6 +9,11 @@ const products = [
   { Id: 2, name: 'Other', status: 'Active', categoryId: 5, freeShipping: true, variations: [{ Id: 21, options: null, newPrice: 300, stock: 10 }] },
   { Id: 7, name: 'Hoodie', status: 'Active', categoryId: null, file: null, images: '["data:image/png;base64,AAAA","https://cdn/hoodie.jpg"]', variations: [variation(26, 'M', 2), variation(27, 'L'), variation(28, 'XL', 0)] },
 ];
+// Landing 50 sells product 1 (offer category); landing 51 sells product 2 (no offer).
+const landingPages = [
+  { Id: 50, productId: 1, regularData: JSON.stringify({ productOptions: [{ productId: 1, name: '2 Attar Combo', price: 999 }] }) },
+  { Id: 51, productId: 2, regularData: JSON.stringify({ productOptions: [{ productId: 2, name: 'Other Combo', price: 700 }] }) },
+];
 const category = { Id: 8, name: 'Offer', status: 'Active', addonProductId: 7, addonPrice: '99.00' };
 require.cache[require.resolve('../models')] = {
   id: require.resolve('../models'),
@@ -17,6 +22,7 @@ require.cache[require.resolve('../models')] = {
     category: { findAll: async () => [category] },
     product: { findAll: async ({ where }) => products.filter((p) => where.Id[Op.in].includes(p.Id)) },
     deliveryCharge: { findAll: async () => [] },
+    landingPage: { findOne: async ({ where }) => landingPages.find((page) => page.Id === where.Id) || null },
   },
 };
 const { priceOrderItems, getAddonOffers } = require('../app/modules/order/orderPricing');
@@ -67,4 +73,28 @@ test('add-on does not cost a free-shipping cart its free delivery', async () => 
 test('incomplete drafts drop invalid add-ons instead of failing', async () => {
   const { items } = await order([attar(), hoodie(undefined)], { strict: false });
   assert.deepEqual(items.map((item) => item.id), [1]);
+});
+
+const landing = (Id, items, options) => priceOrderItems(
+  { items, customerDistrict: 'inside', orderSource: 'Landing Page', tracking: { landingPageId: Id } },
+  options,
+);
+const combo = (qty = 1) => ({ id: 1, name: '2 Attar Combo', price: 1, qty });
+
+test('landing order: add-on priced from the category, landing price kept', async () => {
+  const { items } = await landing(50, [combo(), hoodie(27)]);
+  assert.deepEqual(items.map((item) => [item.name, item.price]), [['2 Attar Combo', 999], ['Hoodie', 99]]);
+  assert.equal(items[1].isAddon, true);
+});
+
+test('landing order: add-ons limited by quantity and by the linked product category', async () => {
+  await assert.rejects(landing(50, [combo(1), hoodie(27, 2)]), /বেশি/);
+  await assert.rejects(landing(51, [{ id: 2, name: 'Other Combo', qty: 1 }, hoodie(27)]), /বেশি/);
+  const { items } = await landing(50, [combo(1), hoodie(27, 2)], { strict: false });
+  assert.deepEqual(items.map((item) => item.id), [1]);
+});
+
+test('landing order: add-on keeps free delivery of a free-shipping landing product', async () => {
+  const { deliveryCharge } = await landing(50, [combo(), hoodie(27)]);
+  assert.equal(deliveryCharge, 0);
 });

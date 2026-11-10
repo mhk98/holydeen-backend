@@ -128,10 +128,19 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
     return payload;
   }
   const options = getLandingOptions(page);
-  const products = await loadProducts(options.map((option) => option.linkedProductId).filter(Boolean));
-  let allFreeShipping = payload.items.length > 0;
+  const mainRequests = payload.items.filter((item) => !item.isAddon);
+  const addonRequests = payload.items.filter((item) => item.isAddon);
+  const rules = addonRequests.length ? await loadAddonRules() : [];
+  const products = await loadProducts([
+    ...options.map((option) => option.linkedProductId).filter(Boolean),
+    ...rules.map((rule) => rule.productId),
+  ]);
+  // Add-ons never affect delivery: a free-shipping order stays free with one added.
+  let allFreeShipping = mainRequests.length > 0;
+  // The real products behind the chosen options decide which add-ons the order earns.
+  const linkedItems = [];
 
-  const items = payload.items.map((item) => {
+  const mainItems = mainRequests.map((item) => {
     const byId = options.filter((option) => Number(option.productId) === Number(item.id));
     const option = byId.find((candidate) => candidate.name === item.name) || byId[0] ||
       options.find((candidate) => candidate.name === item.name);
@@ -145,6 +154,7 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
     const variation = product && product.variations?.length === 1 ? product.variations[0] : null;
     const freeShipping = Boolean(product?.freeShipping);
     if (!freeShipping) allFreeShipping = false;
+    if (product) linkedItems.push({ id: product.Id, qty: item.qty });
     return {
       ...item,
       variantId: variation ? variation.Id : undefined,
@@ -154,6 +164,11 @@ const priceLandingOrder = async (payload, landingPageId, strict) => {
       freeShipping,
     };
   });
+
+  const items = [
+    ...mainItems,
+    ...priceAddonItems(addonRequests, { rules, products, mainItems: linkedItems, strict }),
+  ];
 
   const regularData = parseObject(page.regularData);
   const outside = String(payload.customerDistrict || "").trim().toLowerCase() === "outside";
